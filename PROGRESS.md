@@ -1,8 +1,8 @@
 # PROGRESS.md — English Translation Progress
 
 > **Last updated:** 2026-11-23  
-> **Overall:** 26 / 472 source files translated (5.5%)  
-> **Current focus:** M1 (Part 00) is complete; next is M2 `01-P` (Part 01 prose and navigation)
+> **Overall:** 33 / 472 source files translated (7.0%)  
+> **Current focus:** M2 Part 01 — `01-P` is complete; next is `01-A` (groups 1A + 1B notebooks)
 
 This file is the single source of truth for translation status. Update it
 after every file and every batch. Do not delete completed rows.
@@ -24,7 +24,7 @@ after every file and every batch. Do not delete completed rows.
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | M0 | Bootstrap and dry run | 0 | 0 | 0 | 0 | 0 | ✅ |
 | M1 | Part 00 — Prerequisites | 26 | 26 | 0 | 0 | 0 | 100% |
-| M2 | Part 01 — Hardware, Math, and Systems | 41 | 0 | 0 | 0 | 41 | 0% |
+| M2 | Part 01 — Hardware, Math, and Systems | 41 | 7 | 0 | 0 | 34 | 17.1% |
 | M3 | Part 02 — PyTorch Algorithms | 136 | 0 | 0 | 0 | 136 | 0% |
 | M4 | Part 03 — Triton Kernels | 26 | 0 | 0 | 0 | 26 | 0% |
 | M5 | Part 04 — CUDA and System Optimization | 25 | 0 | 0 | 0 | 25 | 0% |
@@ -34,7 +34,7 @@ after every file and every batch. Do not delete completed rows.
 | M9 | Docs-only pages | 14 | 0 | 0 | 0 | 14 | 0% |
 | M10 | Ancillary development and environment docs (optional) | 5 | 0 | 0 | 0 | 5 | 0% |
 | M11 | Regeneration and final QA | 0 | 0 | 0 | 0 | 0 | — |
-| **Total** | | **472** | **26** | **0** | **0** | **446** | **5.5%** |
+| **Total** | | **472** | **33** | **0** | **0** | **439** | **7.0%** |
 
 Update the counts as you go. A file counts as “Translated” only when it
 meets the definition of done in `AGENTS.md` §13. “Reviewed” means a second
@@ -42,15 +42,13 @@ agent checked it and confirmed the same criteria.
 
 ## Current focus
 
-**M1 (Part 00) is complete.** All 26 Part 00 files are translated, and the whole
-`docs/00_Prerequisites/` mirror was rebuilt with
-`convert_notebook.py --dir 00_Prerequisites` and
-`sync_docs_navigation.py --part 00_Prerequisites`.
+**`01-P` (Part 01 prose and navigation) is complete.** `intro.md` and
+`1A.md`–`1F.md` are translated and mirrored.
 
 Next focus:
 
-- Start M2 with batch `01-P` (Part 01 prose and navigation).
-- Then `01-A`, `01-B`, `01-C`.
+- Translate batch `01-A` (groups 1A + 1B, 13 notebooks).
+- Then `01-B` and `01-C`, followed by the Part 01 checks and rebuild.
 
 ### M0 dry-run notes
 
@@ -114,13 +112,13 @@ notes. Append `· reviewed`, `· blocked: reason`, or a short note as needed.
 
 #### 01-P — Prose and navigation (7 files, 4,438 CJK)
 
-- [ ] `01_Hardware_Math_and_Systems/intro.md`
-- [ ] `01_Hardware_Math_and_Systems/1A.md`
-- [ ] `01_Hardware_Math_and_Systems/1B.md`
-- [ ] `01_Hardware_Math_and_Systems/1C.md`
-- [ ] `01_Hardware_Math_and_Systems/1D.md`
-- [ ] `01_Hardware_Math_and_Systems/1E.md`
-- [ ] `01_Hardware_Math_and_Systems/1F.md`
+- [x] `01_Hardware_Math_and_Systems/intro.md`
+- [x] `01_Hardware_Math_and_Systems/1A.md`
+- [x] `01_Hardware_Math_and_Systems/1B.md`
+- [x] `01_Hardware_Math_and_Systems/1C.md`
+- [x] `01_Hardware_Math_and_Systems/1D.md`
+- [x] `01_Hardware_Math_and_Systems/1E.md`
+- [x] `01_Hardware_Math_and_Systems/1F.md`
 
 #### 01-A — Groups 1A + 1B (13 files, 23,921 CJK)
 
@@ -708,6 +706,7 @@ notes. Append `· reviewed`, `· blocked: reason`, or a short note as needed.
 | 2026-11-23 | OpenCode | M1 `00-P` (0A–0E) | 5 | Structure diff, residual-CJK, mirror check, chapter links | Zero residual CJK; heading/table/link counts match baseline; mirrors rebuilt for the six `00-P` pages |
 | 2026-11-23 | OpenCode | M1 `00-1` (02–10) | 9 | Structure diff, AST (docstrings normalized), cell metadata/outputs, residual-CJK scan, mirror check, chapter links | 0 CJK in markdown prose and 0 in code comments/docstrings; the 56 remaining markdown CJK characters are the required numbered H1 subtitles; no notebook outputs changed; mirrors rebuilt for the nine notebooks |
 | 2026-11-23 | OpenCode | M1 `00-2` (11–20) + M1 close-out | 10 | Structure diff, AST (docstrings normalized), cell metadata/outputs, residual-CJK scan, full Part 00 mirror rebuild, mirror and chapter-link checks, `verify.py` | 0 CJK in markdown prose and 0 in code comments/docstrings; remaining code CJK is print/assert literals plus the numbered H1 subtitles; `verify.py` reported 34 passed / 20 failed, all failures being `ModuleNotFoundError: numpy`/`torch` in this environment; out-of-scope mirrors rewritten by `verify.py` were reverted |
+| 2026-11-23 | OpenCode | M2 `01-P` (intro, 1A–1F) | 7 | Structure diff, residual-CJK, mirror check, chapter links | Zero residual CJK; heading levels, table column counts, link counts, and line/blank-line counts match the baseline; `1E.md` was Chinese-only and received an English H1 and headings; no inbound heading anchors existed |
 
 ## Roadblocks and quirks
 
