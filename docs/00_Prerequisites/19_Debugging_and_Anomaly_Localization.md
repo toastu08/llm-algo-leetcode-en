@@ -1,6 +1,6 @@
 # 19. Debugging and Anomaly Localization | 调试与异常定位
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `调试`, `排错`, `张量健康` | **目标人群：** Part 2-4 前置补课者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `debugging`, `troubleshooting`, `tensor health` | **Audience:** learners preparing for Parts 2–4
 
 > 🚀 **云端运行环境**
 >
@@ -10,38 +10,38 @@
 > [![Open In Studio](https://img.shields.io/badge/Open%20In-ModelScope-blueviolet?logo=alibabacloud)](https://modelscope.cn/my/mynotebook) *(国内推荐：魔搭社区免费实例)*
 
 
-## 本节导读
+## Section Guide
 
-程序报错或训练结果异常时，最先看到的现象不一定最接近原因。更重要的是：正确性没有通过前，耗时和内存结果都不能继续解释为性能证据。非有限损失可能起源于更早的激活或梯度，缺失梯度也可能来自不同的计算图与注册状态。
+When a program raises an error or the training result is abnormal, the symptom you see first is not necessarily the closest to the cause. What matters more is: before correctness passes, timing and memory results cannot continue to be interpreted as performance evidence. A non-finite loss may originate from an earlier activation or gradient, and a missing gradient may also come from different computation graphs and registration states.
 
-完成本节后，你应能按张量契约、数值状态和梯度链路缩小范围，定位第一个失败点，形成可重放的最小复现，并输出当前运行能否进入性能分析的有效性结论。
+After completing this section, you should be able to narrow the scope by tensor contract, numerical state, and gradient chain, locate the first failure point, form a replayable minimal reproduction, and output a validity conclusion on whether the current run can enter performance analysis.
 
-**关键词：** `shape`, `dtype`, `device`, `NaN`
+**Keywords:** `shape`, `dtype`, `device`, `NaN`
 
-![异常分类与第一检查项](../public/00_Prerequisites/19_debugging_anomaly_map.svg)
-
-
-## 前置阅读
-**导语：** 先从 0E 组页判断当前现象属于结构、数值还是梯度问题，再进入对应检查路径。
-- [0E 组页](./0E.md)
-
-## Q1：怎样先判断一次运行是否值得继续分析？
-
-先按现象选择第一项检查：维度不匹配检查结构契约，CPU / CUDA 混用检查设备，loss 变成 NaN 检查首个非有限值，grad 为 None 检查梯度链路。存在任一异常时，当前运行标记为 `invalid`，先定位和复现，不继续解释性能；所有检查通过后，才标记为 `valid` 并进入时间或内存证据采集。
+![Anomaly classification and the first check item](../public/00_Prerequisites/19_debugging_anomaly_map.svg)
 
 
-| 异常类别 | 典型表现 | 第一项检查 |
+## Prerequisite Reading
+**Overview:** First use the 0E group page to decide whether the current symptom is a structure, numerical, or gradient problem, then enter the corresponding check path.
+- [0E Group Page](./0E.md)
+
+## Q1: How do you first decide whether a run is worth further analysis?
+
+First choose the first check by symptom: a dimension mismatch checks the structural contract, mixing CPU / CUDA checks the device, a loss that becomes NaN checks the first non-finite value, and a grad of None checks the gradient chain. If any anomaly exists, mark the current run as `invalid`, localize and reproduce first, and do not continue to interpret performance; only after all checks pass is it marked `valid` and allowed into time or memory evidence collection.
+
+
+| Anomaly category | Typical symptom | First check |
 |:---|:---|:---|
-| shape | 维度不匹配、广播错误 | 输入和算子的 shape |
-| dtype | 类型不兼容、精度异常 | 输入与参数 dtype |
-| device / layout | CPU 与 CUDA 混用、访问路径异常 | device、layout、contiguous |
-| numerical | NaN / Inf | 第一个非有限值 |
-| gradient | grad 为 None 或梯度异常 | 计算图和参数注册 |
+| shape | Dimension mismatch, broadcast error | Shapes of inputs and operators |
+| dtype | Incompatible type, abnormal precision | Input and parameter dtypes |
+| device / layout | Mixing CPU and CUDA, abnormal access path | device, layout, contiguous |
+| numerical | NaN / Inf | The first non-finite value |
+| gradient | grad is None or abnormal gradients | Computation graph and parameter registration |
 
 
 ```python
 def classify_issue(shape_ok, dtype_ok, device_ok, has_nonfinite, grad_ok):
-    """收集异常类别；列表顺序表示教学上的初步检查顺序。"""
+    """Collect anomaly categories; the list order indicates the initial teaching check order."""
     issues = []
     if not shape_ok:
         issues.append('shape')
@@ -57,7 +57,7 @@ def classify_issue(shape_ok, dtype_ok, device_ok, has_nonfinite, grad_ok):
 
 
 def build_validity_summary(issues, first_failure=None, reproducible=False):
-    """把正确性检查收口为后续实验可读取的有效性结论。"""
+    """Turn correctness checks into a validity conclusion that later experiments can read."""
     issue_list = list(issues)
     if any(not isinstance(issue, str) or not issue.strip() for issue in issue_list):
         raise ValueError('异常类别必须是非空字符串')
@@ -82,13 +82,13 @@ healthy_validity = build_validity_summary([])
 print('issues:', sample)
 print('primary:', primary)
 print('validity:', sample_validity)
-# 输出示例: issues -> ['shape', 'device', 'numerical', 'gradient']; primary -> shape
+# Output example: issues -> ['shape', 'device', 'numerical', 'gradient']; primary -> shape
 
 ```
 
-## Q1 验证：异常分类和运行有效性门槛是否一致？
+## Q1 verification: Are the anomaly classification and the run-validity gate consistent?
 
-同时覆盖多种异常与完全正常两条路径；只有正常路径能够继续采集性能证据。
+It covers both the path with multiple anomalies and the fully normal path; only the normal path can continue to collect performance evidence.
 
 ```python
 assert sample == ['shape', 'device', 'numerical', 'gradient']
@@ -101,9 +101,9 @@ assert healthy_validity['next_action'] == 'collect_performance_evidence'
 print('✅ 异常分类与运行有效性门槛通过')
 ```
 
-## Q2：什么时候先看 shape、dtype、device 和 layout？
+## Q2: When do you look at shape, dtype, device, and layout first?
 
-遇到报错时，先按由易到难的顺序检查：shape 决定张量的维度和广播方式，dtype 决定数据类型是否兼容，device 决定模型和输入是否在同一计算位置，layout / contiguous 则影响算子能否直接访问这块内存。契约没有对齐前，先不要急着改优化策略；这里用一个 CPU Tensor 演示这些字段如何被检查。
+When you hit an error, check in order from easiest to hardest: shape determines the tensor's dimensions and broadcasting, dtype determines whether the data types are compatible, device determines whether the model and input are in the same compute location, and layout / contiguous affects whether an operator can access this memory directly. Before the contract is aligned, do not rush to change the optimization strategy; here a CPU Tensor is used to demonstrate how these fields are checked.
 
 
 ```python
@@ -111,7 +111,7 @@ import torch
 
 
 def audit_tensor_contract(actual, expected):
-    """逐项比较张量契约，并返回首个需要先修复的字段。"""
+    """Compare the tensor contract item by item and return the first field that must be fixed."""
     report = {}
     report['shape_ok'] = actual['shape'] == expected['shape']
     report['dtype_ok'] = actual['dtype'] == expected['dtype']
@@ -133,13 +133,14 @@ expected = {'shape': (2, 8, 4), 'dtype': 'torch.float32', 'device': 'cpu', 'cont
 report = audit_tensor_contract(actual, expected)
 print('contract:', report)
 print('must_fix:', [k for k, v in report['checks'].items() if not v])
-# 输出示例: contract 中 contiguous_ok=False, must_fix=['contiguous_ok']
+# Output example: contiguous_ok=False in contract, must_fix=['contiguous_ok']
 
 ```
 
-## Q2 验证：张量契约能否定位首个失败字段？
+## Q2 verification: Can the tensor contract locate the first failing field?
 
-构造只违反连续性要求的视图，避免多个错误同时掩盖定位结果。
+Construct a view that violates only the contiguity requirement, so that multiple errors do not hide the localization result at the same time.
+
 
 ```python
 assert report['first_failure'] == 'contiguous_ok'
@@ -148,14 +149,14 @@ assert not report['checks']['contiguous_ok']
 print('✅ 张量契约的首个失败字段定位通过')
 ```
 
-## Q3：什么时候先查 NaN / Inf，如何找到第一个异常来源？
+## Q3: When do you check NaN / Inf first, and how do you find the first abnormal source?
 
-如果 loss 最后变成 NaN，真正的问题可能更早出现在 activation 或梯度中。按输入 → 前向激活 → 损失 → 反向梯度的实际执行顺序检查，并记录第一个 NaN / Inf 的阶段和对象；第一个异常位置通常比最后看到的 NaN 更接近原因，也能直接指向下一项验证。
+If the loss finally becomes NaN, the real problem may appear earlier in an activation or gradient. Check in the actual execution order of input → forward activation → loss → backward gradients, and record the stage and object of the first NaN / Inf; the first abnormal position is usually closer to the cause than the NaN seen last, and can also point directly to the next verification.
 
 
 ```python
 def first_nonfinite_tensor(records):
-    """按执行顺序返回第一处包含 NaN/Inf 的 Tensor。"""
+    """Return the first Tensor containing NaN/Inf in execution order."""
     if not isinstance(records, list):
         raise TypeError('records 必须是按执行顺序排列的列表')
     for idx, (source, value) in enumerate(records):
@@ -184,7 +185,7 @@ print('source:', failure['source'] if failure else 'ok')
 
 ```
 
-## Q3 验证：第一处非有限值与正常路径是否都能识别？
+## Q3 verification: Can both the first non-finite value and the normal path be identified?
 
 ```python
 assert failure == {'index': 2, 'source': 'mlp', 'nonfinite_count': 1}
@@ -192,9 +193,9 @@ assert first_nonfinite_tensor([('loss', torch.tensor(1.0))]) is None
 print('✅ 第一处非有限值定位通过')
 ```
 
-## Q4：梯度为什么会一直是 `None`，如何区分断开的原因？
+## Q4: Why is the gradient always `None`, and how do you distinguish the reasons for the break?
 
-“grad 为 None”不一定只有一个原因：可能是 detach() 切断了当前 Tensor，可能是 no_grad() 关闭了梯度追踪，也可能是非叶子 Tensor 默认不保留梯度，或参数根本没有注册进模块。还要区分“grad 为 None”和“grad 的数值为 0”：前者表示没有生成或没有保留梯度，后者表示梯度已经存在，只是当前值为零。先根据出现位置判断是哪一种，再决定检查计算图、梯度属性还是模块参数。
+"grad is None" does not necessarily have only one cause: it may be that detach() cut off the current Tensor, that no_grad() disabled gradient tracking, that a non-leaf Tensor does not keep gradients by default, or that the parameter was not registered in the module at all. You also need to distinguish "grad is None" from "the value of grad is 0": the former means no gradient was produced or kept, and the latter means the gradient already exists and only its current value is zero. First determine which case it is from the position where it appears, then decide whether to check the computation graph, the gradient attributes, or the module parameters.
 
 
 ```python
@@ -231,7 +232,7 @@ print('gradient cases:', gradient_cases)
 
 ```
 
-## Q4 验证：`grad=None`、`grad=0` 与未注册参数能否被区分？
+## Q4 verification: Can `grad=None`, `grad=0`, and unregistered parameters be distinguished?
 
 ```python
 assert not gradient_cases['detached_requires_grad']
@@ -242,9 +243,9 @@ assert 'raw_weight' not in gradient_cases['registered_parameters']
 print('✅ grad=None、grad=0、非叶子 Tensor 和未注册参数机制通过')
 ```
 
-## Q5：如何用模块 hook 找到模型内部第一处异常？
+## Q5: How do you use module hooks to find the first anomaly inside the model?
 
-输入契约正常但最终损失仍为非有限值时，需要把检查点放进模型内部。前向 hook 可以记录各模块输出是否有限，帮助找到第一处失败模块；如果前向结果有限而反向失败，再使用 `torch.autograd.detect_anomaly()` 或梯度 hook 检查反向路径。hook 应在定位后移除，避免重复注册。
+When the input contract is normal but the final loss is still non-finite, the checkpoints need to be placed inside the model. A forward hook can record whether the output of each module is finite, helping find the first failing module; if the forward result is finite but backward fails, then use `torch.autograd.detect_anomaly()` or gradient hooks to check the backward path. Hooks should be removed after localization to avoid duplicate registration.
 
 
 ```python
@@ -279,7 +280,7 @@ print('first bad module:', first_bad_module)
 
 ```
 
-## Q5 验证：hook 是否定位第一处非有限模块并被移除？
+## Q5 verification: Does the hook locate the first non-finite module and get removed?
 
 ```python
 assert first_bad_module == '2'
@@ -289,22 +290,22 @@ assert all(not module._forward_hooks for module in probe_model.children())
 print('✅ 前向 hook 定位与清理通过')
 ```
 
-## Q6：怎样把首个失败点收缩成可重放的最小复现？
+## Q6: How do you shrink the first failure point into a replayable minimal reproduction?
 
-定位到失败模块后，保留触发失败所需的最少信息：随机种子、输入值与 shape、dtype、操作名称、框架版本和首个失败位置。最小复现不携带完整训练流水线；它应该能够在一个独立函数中重新触发同一失败，便于确认修复前后是否一致。最后把异常类别、首个失败点和复现状态写入有效性结论，交给 20 节决定是停止实验还是继续采集性能证据。
+After locating the failing module, keep the minimum information needed to trigger the failure: random seed, input values and shape, dtype, operation name, framework version, and the first failure position. A minimal reproduction does not carry the complete training pipeline; it should be able to retrigger the same failure in an independent function, making it easy to confirm consistency before and after the fix. Finally, write the anomaly category, the first failure point, and the reproduction state into the validity conclusion, and hand it to section 20 to decide whether to stop the experiment or continue collecting performance evidence.
 
-| 复现字段 | 为什么保留 |
+| Reproduction field | Why keep it |
 |:---|:---|
-| seed 与输入 | 固定触发条件 |
-| shape / dtype | 固定张量契约 |
-| operation | 保留最小失败操作 |
-| first failure | 对照修复前后的定位结果 |
-| framework version | 解释运行时差异 |
+| seed and input | Fix the trigger conditions |
+| shape / dtype | Fix the tensor contract |
+| operation | Keep the minimal failing operation |
+| first failure | Compare the localization result before and after the fix |
+| framework version | Explain runtime differences |
 
 
 ```python
 def build_minimal_repro(seed=7):
-    """构造并记录一个可独立重放的非有限值案例。"""
+    """Construct and record a non-finite value case that can be replayed independently."""
     torch.manual_seed(seed)
     inputs = torch.tensor([-1.0, 4.0], dtype=torch.float32)
     outputs = torch.sqrt(inputs)
@@ -320,7 +321,7 @@ def build_minimal_repro(seed=7):
     }
 
 def replay_minimal_repro(record):
-    """仅重放本例声明的 sqrt/FP32 操作，并核对输入形状。"""
+    """Replay only the sqrt/FP32 operation declared by this example and check the input shape."""
     required = {'input_values', 'shape', 'dtype', 'operation'}
     if not required <= set(record):
         raise KeyError('复现记录缺少输入、形状、类型或操作')
@@ -344,7 +345,7 @@ print('validity report:', validity_report)
 
 ```
 
-## Q6 验证：最小复现是否能够重新触发同一失败？
+## Q6 verification: Can the minimal reproduction retrigger the same failure?
 
 ```python
 assert repro['operation'] == 'torch.sqrt'
@@ -371,8 +372,8 @@ else:
 print('✅ 最小复现、输入一致性与有效性结论通过')
 ```
 
-## 相关阅读
-**导语：** 完成本节后，可以回补 Autograd 语义，并把可复现的正确性证据带入性能实验。
-- [Part 00 · 07 Autograd 与反向传播](./07_PyTorch_Autograd_and_Backward.md)
-- [PyTorch 异常检测官方文档](https://docs.pytorch.org/docs/stable/autograd.html#debugging-and-anomaly-detection)
-- [Part 00 · 20 性能证据与实验设计](./20_Performance_Evidence_and_Experiment_Design.md)
+## Related Reading
+**Overview:** After completing this section, you can go back and reinforce Autograd semantics, and bring reproducible correctness evidence into performance experiments.
+- [Part 00 · 07 Autograd and Backward Propagation](./07_PyTorch_Autograd_and_Backward.md)
+- [PyTorch anomaly detection official documentation](https://docs.pytorch.org/docs/stable/autograd.html#debugging-and-anomaly-detection)
+- [Part 00 · 20 Performance Evidence and Experiment Design](./20_Performance_Evidence_and_Experiment_Design.md)

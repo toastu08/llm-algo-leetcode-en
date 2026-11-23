@@ -1,6 +1,6 @@
 # 13. Transformer Block Dataflow and Residual Stream | Transformer Block 数据流与残差通路
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `Transformer`, `Block`, `Residual` | **目标人群：** 准备理解现代大模型组件如何组装的学习者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `Transformer`, `Block`, `Residual` | **Audience:** learners preparing to understand how modern LLM components are assembled
 
 > 🚀 **云端运行环境**
 >
@@ -10,24 +10,24 @@
 > [![Open In Studio](https://img.shields.io/badge/Open%20In-ModelScope-blueviolet?logo=alibabacloud)](https://modelscope.cn/my/mynotebook) *(国内推荐：魔搭社区免费实例)*
 
 
-## 本节导读
+## Section Guide
 
-Transformer Block 不断读取并更新同一条 residual stream。Attention 分支负责 token 间的信息聚合，MLP 分支负责逐 token 的通道变换；两个分支都必须在写回主路径前恢复统一 hidden shape。
+A Transformer Block continuously reads and updates the same residual stream. The Attention branch is responsible for information aggregation across tokens, and the MLP branch for per-token channel transformation; both branches must restore the uniform hidden shape before writing back to the main path.
 
-完成本节后，你应能追踪一个 Block 的两次 residual update，区分主路径状态与分支更新量，并检查多层堆叠是否保持形状和状态推进。
+After completing this section, you should be able to trace the two residual updates of one Block, distinguish the main-path state from the branch updates, and check whether multi-layer stacking preserves the shape and advances the state.
 
-**关键词：** `hidden state`, `residual stream`, `branch update`, `Block stack`
+**Keywords:** `hidden state`, `residual stream`, `branch update`, `Block stack`
 
-![Transformer Block 数据流与残差通路](../public/00_Prerequisites/13_transformer_block_dataflow.svg)
+![Transformer Block dataflow and residual path](../public/00_Prerequisites/13_transformer_block_dataflow.svg)
 
-## 前置阅读
-**导语：** 模型对象和训练生命周期说明了 Block 如何被调用与更新；本页进一步观察 Block 内部怎样保持 hidden state 契约。
-- [12. PyTorch Data Interface and Training Lifecycle | PyTorch 数据接口与训练生命周期](./12_PyTorch_Minimal_Training_Interface.md)
-- [0D 组页](./0D.md)
+## Prerequisite Reading
+**Overview:** The model object and training lifecycle explain how a Block is called and updated; this page further observes how the hidden state contract is maintained inside the Block.
+- [12. PyTorch Data Interface and Training Lifecycle](./12_PyTorch_Minimal_Training_Interface.md)
+- [0D Group Page](./0D.md)
 
-## Q1：为什么 Block 的输入输出通常保持同一 hidden shape？
+## Q1: Why do a Block's input and output usually keep the same hidden shape?
 
-Residual addition 要求主路径与更新分支拥有相同 shape。Block 可以在内部拆分 heads 或扩大 MLP 中间维，但写回 residual stream 前必须恢复为 `[batch, sequence, hidden]`。
+Residual addition requires the main path and the update branch to have the same shape. A Block may internally split heads or expand the MLP intermediate dimension, but before writing back to the residual stream it must restore `[batch, sequence, hidden]`.
 
 
 ```python
@@ -36,7 +36,7 @@ import torch.nn as nn
 
 
 def residual_update(hidden_states, branch_update):
-    """检查 residual contract 后，将分支更新写回主路径。"""
+    """Check the residual contract, then write the branch update back to the main path."""
     if hidden_states.shape != branch_update.shape:
         raise ValueError(
             f'residual shape mismatch: {tuple(hidden_states.shape)} != {tuple(branch_update.shape)}'
@@ -51,9 +51,9 @@ print('residual shape：', tuple(updated_states.shape))
 
 ```
 
-## Q1 验证：Residual addition 是否保持 shape 并拒绝非法更新？
+## Q1 verification: Does residual addition preserve the shape and reject invalid updates?
 
-合法更新应保持主路径 shape；hidden 维不一致时应在相加前给出明确错误。
+A valid update should preserve the main-path shape; when the hidden dimension differs, an explicit error should be raised before the addition.
 
 
 ```python
@@ -69,14 +69,14 @@ print('✅ residual shape contract 通过')
 
 ```
 
-## Q2：Attention 与 MLP 怎样形成两次 residual update？
+## Q2: How do Attention and MLP form two residual updates?
 
-现代 decoder Block 通常先把 Attention 输出写回 residual stream，再把 MLP 输出写回更新后的主路径。下面用保持 shape 的分支分别表示 token mixing 与 channel mixing，验证两次更新的顺序和 hidden shape 契约。
+A modern decoder Block usually first writes the Attention output back to the residual stream, and then writes the MLP output back to the updated main path. Below, shape-preserving branches represent token mixing and channel mixing respectively, to verify the order of the two updates and the hidden shape contract.
 
 
 ```python
 class ResidualBlockSkeleton(nn.Module):
-    """只表示两个 shape-preserving 分支的接口，不替代真实 Attention/MLP。"""
+    """Represent only the interface of two shape-preserving branches; does not replace real Attention/MLP."""
 
     def __init__(self, hidden_size):
         super().__init__()
@@ -108,9 +108,9 @@ print({name: tuple(value.shape) for name, value in block_states.items()})
 
 ```
 
-## Q2 验证：两次分支更新是否按顺序写回 residual stream？
+## Q2 verification: Are the two branch updates written back to the residual stream in order?
 
-五个观察量应保持相同 shape；`after_attention` 必须等于输入加 Attention 更新量，最终输出必须等于更新后的主路径加 MLP 更新量。
+The five observed quantities should keep the same shape; `after_attention` must equal the input plus the Attention update, and the final output must equal the updated main path plus the MLP update.
 
 
 ```python
@@ -127,9 +127,9 @@ print('✅ Attention/MLP 两次 residual update 通过')
 
 ```
 
-## Q3：为什么要区分 residual state 与 branch update？
+## Q3: Why distinguish the residual state from the branch update?
 
-Residual state 是传给下一分支、下一层的主路径状态；branch update 是当前子层产生的增量。两者 shape 相同，但含义不同。把增量单独记录，才能核对每次写回发生在哪里，而不把“保持 shape”误认为“状态没有变化”。
+The residual state is the main-path state passed to the next branch and the next layer; the branch update is the increment produced by the current sublayer. The two have the same shape but different meanings. Only by recording the increment separately can you check where each write-back happens, instead of mistaking "shape preserved" for "state unchanged".
 
 
 ```python
@@ -146,9 +146,9 @@ for name, value in state_and_update_rms.items():
 
 ```
 
-## Q3 验证：主路径与两个增量能否分别重建？
+## Q3 verification: Can the main path and the two increments be reconstructed separately?
 
-两个更新量都应为有限值，并分别重建 Attention 写回和 MLP 写回后的状态。这里验证的是状态关系，不据此判断深层训练稳定性。
+Both updates should be finite values, and they should separately reconstruct the state after the Attention write-back and after the MLP write-back. What is verified here is the state relationship; deep training stability is not judged from it.
 
 
 ```python
@@ -164,9 +164,9 @@ print('✅ residual state 与 branch update 已分离验证')
 
 ```
 
-## Q4：多个 Block 堆叠时，residual stream 怎样逐层演化？
+## Q4: When multiple Blocks are stacked, how does the residual stream evolve layer by layer?
 
-Block stack 在层间传递同一 hidden-state 契约，每层读取上一层输出并产生新的 residual state。记录逐层状态，可以检查 shape、层数和状态是否真实推进；深层数值与梯度是否稳定，需要进入架构和训练实验继续验证。
+The Block stack passes the same hidden-state contract between layers, and each layer reads the previous layer's output and produces a new residual state. Recording the layer-by-layer states can check the shape, the number of layers, and whether the state actually advances; whether the deep-layer values and gradients are stable requires further verification in architecture and training experiments.
 
 
 ```python
@@ -192,9 +192,9 @@ print('layer state shapes：', [tuple(state.shape) for state in layer_states])
 
 ```
 
-## Q4 验证：层数、shape 和状态推进是否一致？
+## Q4 verification: Are the layer count, shape, and state advancement consistent?
 
-三个 Block 应产生四个可观察状态；每个状态保持统一 shape，相邻层输出应发生变化。
+Three Blocks should produce four observable states; each state keeps the uniform shape, and the output of adjacent layers should change.
 
 
 ```python
@@ -206,11 +206,11 @@ print('✅ Block stack 与 residual state 推进通过')
 
 ```
 
-## 相关阅读
+## Related Reading
 
-Block 骨架之后，可以分别深入非线性、统计路径和 token 信息聚合；设计演进和深层稳定性由架构专题继续展开。
+After the Block skeleton, you can go deeper into nonlinearity, the statistical path, and token information aggregation separately; design evolution and deep-layer stability are expanded in the architecture topic.
 
-- [14. Activation Functions | 激活函数](./14_Activation_Functions.md)
-- [15. Normalization Techniques | 归一化技术](./15_Normalization_Techniques.md)
-- [16. Attention Mechanism Intro | Attention 机制导论](./16_Attention_Mechanism_Intro.md)
-- [大模型架构演进 · Transformer 块与残差主干](../topic_discussion/llm_architecture_evolution/06_block_residual_path.md)
+- [14. Activation Functions](./14_Activation_Functions.md)
+- [15. Normalization Techniques](./15_Normalization_Techniques.md)
+- [16. Attention Mechanism Intro](./16_Attention_Mechanism_Intro.md)
+- [LLM Architecture Evolution · Transformer block and residual backbone](../topic_discussion/llm_architecture_evolution/06_block_residual_path.md)

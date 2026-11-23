@@ -1,6 +1,6 @@
 # 17. PyTorch Profiling Basics | PyTorch 性能分析基础
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `PyTorch`, `profiling`, `性能分析` | **目标人群：** Part 2-4 前置补课者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `PyTorch`, `profiling`, `performance analysis` | **Audience:** learners preparing for Parts 2–4
 
 > 🚀 **云端运行环境**
 >
@@ -10,34 +10,34 @@
 > [![Open In Studio](https://img.shields.io/badge/Open%20In-ModelScope-blueviolet?logo=alibabacloud)](https://modelscope.cn/my/mynotebook) *(国内推荐：魔搭社区免费实例)*
 
 
-## 本节导读
+## Section Guide
 
-确认运行结果有效后，如果一次运行变慢，需要同时观察算子汇总、阶段时间线和重复测量分布。单次总耗时无法说明时间消耗在哪个阶段，也无法区分稳定热点与偶然波动。
+After confirming that the run results are valid, if a run becomes slow, you need to observe the operator summary, the stage timeline, and the distribution of repeated measurements at the same time. A single total elapsed time cannot show which stage consumes the time, nor distinguish a stable hotspot from an occasional fluctuation.
 
-完成本节后，你应能建立带单位的时间证据，区分汇总表与追踪记录的用途，并把局部热点放回完整训练步骤。先用热点选择下一项检查，再用对照实验检验原因。
+After completing this section, you should be able to build time evidence with units, distinguish the purpose of the summary table from that of the trace record, and place local hotspots back into the complete training step. First use the hotspot to choose the next check, then use a controlled experiment to test the cause.
 
-**关键词：** `profiler`, `trace`, `latency`
+**Keywords:** `profiler`, `trace`, `latency`
 
-![Profiling 时间证据图](../public/00_Prerequisites/17_profiling_evidence_map.svg)
+![Profiling time evidence diagram](../public/00_Prerequisites/17_profiling_evidence_map.svg)
 
-## 前置阅读
-**导语：** 先从 0E 组页了解诊断顺序，并用 19 节确认运行有效，再把一次运行拆成可比较的时间证据。
-- [0E 组页](./0E.md)
-- [Part 00 · 19 调试与异常定位](./19_Debugging_and_Anomaly_Localization.md)
+## Prerequisite Reading
+**Overview:** First learn the diagnostic order from the 0E group page, confirm that the run is valid with section 19, and then break a run into comparable time evidence.
+- [0E Group Page](./0E.md)
+- [Part 00 · 19 Debugging and Anomaly Localization](./19_Debugging_and_Anomaly_Localization.md)
 
-## Q1：如何建立一次可比较的性能记录？
+## Q1: How do you build a comparable performance record?
 
-假设你已经有一个通过正确性检查的固定模型和输入。一次运行等待时间变长，要看 latency；单位时间处理的样本或 token 变少，要看 throughput。第一次运行还可能包含初始化成本，所以先预热，再重复测量，最后把时间结果和 profiler 热点放进同一条记录。
+Assume you already have a fixed model and input that pass the correctness check. When the waiting time of a run becomes longer, look at latency; when the samples or tokens processed per unit time decrease, look at throughput. The first run may also include initialization cost, so warm up first, then repeat the measurement, and finally put the time results and profiler hotspots into the same record.
 
-为了让两次结果可比较，至少固定模型、输入形状、dtype、batch 和线程设置；先丢弃预热轮次，再保留全部重复样本，最后报告中位数和 P95。中位数描述典型运行，P95 暴露慢样本；单次运行和只报告平均值都不足以描述分布。
+To make two results comparable, at least fix the model, input shape, dtype, batch, and thread settings; first discard the warm-up rounds, then keep all repeated samples, and finally report the median and P95. The median describes a typical run, and P95 exposes slow samples; a single run or reporting only the mean is not enough to describe the distribution.
 
-| 记录项 | 作用 |
+| Record item | Purpose |
 |:---|:---|
-| latency samples | 保留每轮时间，避免汇总值掩盖抖动 |
-| median / P95 | 分别描述典型延迟和慢样本延迟 |
-| throughput | 判断单位时间处理多少样本或 token |
-| profiler hotspot | 找到时间集中的算子或阶段，选择下一项检查 |
-| 环境记录 | 保存模型、输入、dtype 和版本，保证结果可复查 |
+| latency samples | Keep the time of each round so that summarized values do not hide jitter |
+| median / P95 | Describe typical latency and slow-sample latency respectively |
+| throughput | Determine how many samples or tokens are processed per unit time |
+| profiler hotspot | Find the operator or stage where the time is concentrated, and choose the next check |
+| environment record | Save the model, input, dtype, and versions to keep the result reviewable |
 
 
 ```python
@@ -52,7 +52,7 @@ import torch
 import torch.nn as nn
 from torch.profiler import profile, ProfilerActivity
 
-# 修改一个输入后重新运行本节，比较相同范围的时间记录。
+# Change one input and rerun this section to compare the time record over the same scope.
 SEED, WARMUP, REPEATS, BATCH_SIZE = 7, 2, 20, 32
 torch.manual_seed(SEED)
 model = nn.Sequential(nn.Linear(100, 200), nn.ReLU(), nn.Linear(200, 10)).eval()
@@ -69,7 +69,7 @@ with torch.no_grad():
 
 
 def nearest_rank(values, fraction):
-    """按最近秩计算分位数；中位数另用 statistics.median。"""
+    """Compute a quantile by nearest rank; the median is computed separately with statistics.median."""
     if not values or not 0 <= fraction <= 1:
         raise ValueError('values 不能为空，fraction 必须位于 [0, 1]')
     if any(not math.isfinite(value) or value < 0 for value in values):
@@ -113,9 +113,9 @@ print(summary)
 
 ```
 
-## Q1 验证：用预热、重复样本和延迟分布建立基线
+## Q1 verification: Build a baseline with warm-up, repeated samples, and a latency distribution
 
-这里验证 summary 保留原始样本，并同时包含中位数、P95、吞吐和热点报表。
+Here it verifies that the summary keeps the raw samples and contains the median, P95, throughput, and hotspot table at the same time.
 
 
 ```python
@@ -133,19 +133,19 @@ print('✅ CPU 前向基线、测量范围与热点记录通过')
 
 ```
 
-## Q2：为什么主机时间不能直接代替设备时间？
+## Q2: Why can host time not directly replace device time?
 
-主机负责准备输入、发起算子并在必要时等待，设备负责执行 kernel；数据搬运和同步还可能穿插在两者之间。CPU time 只能说明主机侧调用、调度和等待，不能代替 CUDA kernel 时间。当前 CPU-first 练习先验证主机活动记录；进入 GPU 实验后，必须在相同 workload 下同时采集 CUDA 活动、搬运与同步事件。
+The host prepares inputs, launches operators, and waits when necessary, and the device executes kernels; data transfers and synchronization may also be interleaved between the two. CPU time can only describe host-side calls, scheduling, and waiting, and cannot replace CUDA kernel time. The current CPU-first exercise first verifies host activity recording; after entering GPU experiments, CUDA activity, transfers, and synchronization events must be collected at the same time under the same workload.
 
-| 观察项 | 代表什么 | 常见解释 |
+| Observation | What it represents | Common interpretation |
 |:---|:---|:---|
-| 主机时间 | CPU 侧调用、调度和等待 | 可能存在数据准备、启动或同步开销 |
-| 设备时间 | GPU kernel 执行区间 | 反映设备侧计算活动 |
-| 搬运与同步 | 数据传输、事件依赖和显式等待 | 解释主机与设备时间线之间的空隙 |
+| Host time | CPU-side calls, scheduling, and waiting | Data preparation, launch, or synchronization overhead may exist |
+| Device time | GPU kernel execution intervals | Reflects device-side compute activity |
+| Transfers and synchronization | Data transfer, event dependencies, and explicit waits | Explain the gaps between the host and device timelines |
 
 
 ```python
-# CPU-first 页面只采集主机活动；本结果不能外推 CUDA kernel 时间。
+# The CPU-first page collects only host activity; this result cannot be extrapolated to CUDA kernel time.
 with profile(activities=[ProfilerActivity.CPU]) as cpu_prof:
     with torch.no_grad():
         _ = model(inputs)
@@ -154,9 +154,9 @@ print(cpu_time_table)
 
 ```
 
-## Q2 验证：检查 CPU 侧的调用时间基线
+## Q2 verification: Check the CPU-side call time baseline
 
-该验证检查 CPU 侧 profiling 接口与阶段计时结果。CUDA kernel、同步和数据搬运时间应在 Part 02 的 GPU 实验中使用 CUDA 活动记录采集。
+This verification checks the CPU-side profiling interface and the stage timing results. CUDA kernel, synchronization, and data transfer times should be collected with CUDA activity recording in the GPU experiments of Part 02.
 
 
 ```python
@@ -166,9 +166,9 @@ print('✅ 主机活动记录通过；设备、搬运与同步证据需在 GPU �
 
 ```
 
-## Q3：什么时候需要从汇总表升级到 trace？
+## Q3: When do you need to move from the summary table to a trace?
 
-汇总表适合回答“哪个算子或阶段累计时间最高”；如果还要知道阶段的先后、等待关系或多次迭代的变化，就需要 trace。trace 是带时间戳的事件记录，可以先检查事件数量和名称，再交给 Chrome Trace 或 TensorBoard Profiler 查看完整时间线。
+The summary table is suitable for answering "which operator or stage has the highest cumulative time"; if you also need to know the order of stages, the waiting relationships, or the changes across iterations, you need a trace. A trace is an event record with timestamps; you can first check the event count and names, then hand it to Chrome Trace or TensorBoard Profiler to view the complete timeline.
 
 
 ```python
@@ -189,9 +189,9 @@ print('sample event names:', named_events[:8])
 
 ```
 
-## Q3 验证：检查可回看的 trace 文件
+## Q3 verification: Check a trace file that can be reviewed later
 
-验证代码先读取 trace 的事件列表，再清理临时文件。需要人工查看完整时间线时，可以把 `trace_path` 改为希望保留的输出目录。
+The verification code first reads the trace event list, then cleans up the temporary file. When you need to inspect the complete timeline manually, you can change `trace_path` to an output directory you want to keep.
 
 
 ```python
@@ -204,9 +204,9 @@ print('✅ 临时 trace 已清理')
 
 ```
 
-## Q4：如何把局部热点放回完整训练步骤？
+## Q4: How do you place a local hotspot back into the complete training step?
 
-如果一个训练步骤总耗时变长，只测某个 Linear 算子还不能说明问题：慢点可能在 forward、loss、backward，也可能在 optimizer step。把这些阶段放进同一个最小训练闭环，并用标签标记，才能把局部热点放回完整训练过程。本例单独采集一个完整训练步骤的阶段记录，不沿用 Q1 的前向延迟和吞吐。各标签互不嵌套，阶段占比的分母是这些标签的时间之和；它不包含未标记的 Python 开销，也不是重复测量的端到端时间。
+If the total time of a training step grows longer, measuring only one Linear operator is not enough: the slow point may be in forward, loss, backward, or the optimizer step. Only by putting these stages into the same minimal training loop and marking them with labels can you place the local hotspot back into the complete training process. This example collects the stage record of one complete training step separately and does not reuse the forward latency and throughput of Q1. The labels are not nested; the denominator of the stage share is the sum of the times of these labels. It does not include unlabeled Python overhead, nor is it an end-to-end time from repeated measurements.
 
 
 ```python
@@ -259,9 +259,9 @@ print('time evidence:', time_evidence)
 
 ```
 
-## Q4 验证：检查训练阶段标签和热点结果
+## Q4 verification: Check the training stage labels and the hotspot result
 
-这里复用前一个单元的结果，确认五个训练阶段都被标记、损失有限，且训练阶段记录没有混入前向基线的延迟样本。
+Here it reuses the result of the previous cell to confirm that all five training stages are labeled, the loss is finite, and the training-stage record does not mix in latency samples from the forward baseline.
 
 
 ```python
@@ -279,8 +279,8 @@ print('✅ 训练阶段标签、时间证据与解释边界通过')
 
 ```
 
-## 相关阅读
-**导语：** 完成本节后，可以继续学习显存账本、硬件瓶颈模型和真实 profiling 项目。
-- [Part 00 · 20 性能证据与实验设计](./20_Performance_Evidence_and_Experiment_Design.md)
-- [Part 01 · 13 性能分析与瓶颈定位](../01_Hardware_Math_and_Systems/13_Profiling_and_Bottleneck_Analysis.md)
-- [PyTorch Profiler 官方教程](https://docs.pytorch.org/tutorials/recipes/recipes/profiler_recipe.html)
+## Related Reading
+**Overview:** After completing this section, you can continue with the memory ledger, the hardware bottleneck model, and real profiling projects.
+- [Part 00 · 20 Performance Evidence and Experiment Design](./20_Performance_Evidence_and_Experiment_Design.md)
+- [Part 01 · 13 Profiling and Bottleneck Analysis](../01_Hardware_Math_and_Systems/13_Profiling_and_Bottleneck_Analysis.md)
+- [PyTorch Profiler official tutorial](https://docs.pytorch.org/tutorials/recipes/recipes/profiler_recipe.html)

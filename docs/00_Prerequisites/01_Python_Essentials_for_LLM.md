@@ -1,6 +1,6 @@
 # 01. Python Essentials for LLM | Python 基础与数据表示
 
-**难度：** Easy | **环境：** CPU-first | **标签：** `Python`, `工程基础`, `数据结构` | **目标人群：** Part 2-4 前置补课者
+**Difficulty:** Easy | **Environment:** CPU-first | **Tags:** `Python`, `engineering fundamentals`, `data structures` | **Audience:** learners preparing for Parts 2–4
 
 > 🚀 **云端运行环境**
 >
@@ -10,27 +10,27 @@
 > [![Open In Studio](https://img.shields.io/badge/Open%20In-ModelScope-blueviolet?logo=alibabacloud)](https://modelscope.cn/my/mynotebook) *(国内推荐：魔搭社区免费实例)*
 
 
-## 本节导读
+## Section Guide
 
-后续教程会反复使用有序数据、固定维度和命名字段传递 token、形状、配置与指标。数据结构选错后，字段含义、可变性和输入边界会变得含糊。
+Later tutorials repeatedly use ordered data, fixed dimensions, and named fields to pass tokens, shapes, configurations, and metrics. After choosing the wrong data structure, field meaning, mutability, and input boundaries become ambiguous.
 
-完成本节后，你应能按顺序、可变性和字段访问方式选择数据结构，并用输入输出契约尽早识别缺失字段与非法输入。
+After completing this section, you should be able to choose a data structure based on ordering, mutability, and field access, and use input/output contracts to identify missing fields and invalid inputs early.
 
-**关键词：** `list`, `tuple`, `dict`, `function contract`
+**Keywords:** `list`, `tuple`, `dict`, `function contract`
 
-![Python 数据与函数契约](../public/00_Prerequisites/01_python_contract_stream_map.svg)
+![Python data and function contracts](../public/00_Prerequisites/01_python_contract_stream_map.svg)
 
-## 前置阅读
-**导语：** 本页是 Part 00 的代码入口；具备基础 Python 经验时，可以直接从问题和验证代码开始。
-- [0A 组页](./0A.md)
+## Prerequisite Reading
+**Overview:** This page is the code entry point for Part 00; if you have basic Python experience, you can start directly with the questions and verification code.
+- [0A Group Page](./0A.md)
 
-## Q1：list、tuple 和 dict 分别适合表达什么？
+## Q1: What are `list`, `tuple`, and `dict` each best suited to express?
 
-`list` 适合会增删或按顺序处理的样本，`tuple` 适合固定含义的 shape，`dict` 适合按名称访问的配置和指标。选择数据结构时先看信息是否有顺序、是否固定、是否需要按字段读取。
+`list` is suited to samples that are added, removed, or processed in order; `tuple` is suited to shapes with fixed meaning; `dict` is suited to configurations and metrics accessed by name. When choosing a data structure, first ask whether the information is ordered, whether it is fixed, and whether it needs to be read by field.
 
 ```python
 def describe_batch(tokens, shape, metrics):
-    """汇总 token 序列、固定 shape 和命名指标。"""
+    """Summarize the token sequence, fixed shape, and named metrics."""
     return {
         'token_count': len(tokens),
         'unique_tokens': len(set(tokens)),
@@ -45,9 +45,9 @@ metrics = {'loss': 0.25, 'learning_rate': 1e-3}
 print(describe_batch(tokens, shape, metrics))
 ```
 
-## Q1 验证：三类数据是否保持各自语义？
+## Q1 verification: Do the three data types preserve their respective semantics?
 
-这里检查顺序、固定维度和命名字段没有在汇总过程中混淆。
+This checks that order, fixed dimensions, and named fields are not mixed up during summarization.
 
 ```python
 summary = describe_batch(['a', 'b', 'a'], (2, 4), {'loss': 0.5})
@@ -61,13 +61,13 @@ assert describe_batch([], (0, 4), {'loss': 0.0})['token_count'] == 0
 print('✅ Python 数据结构通过')
 ```
 
-## Q2：函数怎样形成可复用的输入输出契约？
+## Q2: How does a function form a reusable input/output contract?
 
-函数签名应区分必需输入和可选策略。下面把 `batch_size` 与 `drop_last` 设为关键字参数，使调用位置直接表达含义；返回字典则保留完整 batch 数、余数和执行步数，避免只返回一个难以解释的数字。
+A function signature should distinguish required inputs from optional policies. Below, `batch_size` and `drop_last` are keyword arguments so the call site directly expresses their meaning; the returned dictionary preserves the full batch count, the remainder, and the number of execution steps, avoiding the need to return a single number that is hard to interpret.
 
 ```python
 def build_batch_plan(sample_count, *, batch_size=4, drop_last=False):
-    """根据非负样本数计算 batch 计划；返回完整批、余数和执行步数。"""
+    """Compute the batch plan from a non-negative sample count; return full batches, the remainder, and execution steps."""
     if not isinstance(sample_count, int) or sample_count < 0:
         raise ValueError('sample_count must be a non-negative integer')
     if not isinstance(batch_size, int) or batch_size <= 0:
@@ -86,9 +86,9 @@ def build_batch_plan(sample_count, *, batch_size=4, drop_last=False):
 print(build_batch_plan(10, batch_size=4))
 ```
 
-## Q2 验证：默认策略、边界和非法输入是否清楚？
+## Q2 verification: Are the default policy, boundaries, and invalid inputs clear?
 
-验证既覆盖有余数和丢弃尾批，也确认非法 batch size 会立即失败。
+The verification covers both a remainder and dropping the tail batch, and confirms that an invalid batch size fails immediately.
 
 ```python
 assert build_batch_plan(10, batch_size=4)['steps'] == 3
@@ -104,13 +104,13 @@ else:
 print('✅ 函数契约通过')
 ```
 
-## Q3：为什么要在数据入口校验必需字段？
+## Q3: Why validate required fields at the data entry point?
 
-配置、样本和结果通常以 dict 传递。越早检查字段和类型，越容易把错误定位在输入入口，而不是等到模型内部才出现难以理解的 KeyError 或 shape 错误。校验函数还应返回新对象，避免意外修改调用方的数据。
+Configurations, samples, and results are usually passed as dicts. The earlier you check fields and types, the easier it is to locate an error at the input entry point instead of waiting until a confusing KeyError or shape error appears inside the model. The validation function should also return a new object to avoid accidentally modifying the caller's data.
 
 ```python
 def validate_record(record, required_fields):
-    """检查命名字段并返回浅拷贝，不修改输入 record。"""
+    """Check named fields and return a shallow copy without modifying the input record."""
     if not isinstance(record, dict):
         raise TypeError('record must be a dict')
     missing = [field for field in required_fields if field not in record]
@@ -125,9 +125,9 @@ validated['source'] = 'toy'
 print(validated)
 ```
 
-## Q3 验证：缺失字段能否被准确定位？
+## Q3 verification: Can missing fields be located precisely?
 
-这里同时检查正常输入、输入不被修改，以及缺失字段的失败信息。
+This checks normal input, that the input is not modified, and the failure message for a missing field.
 
 ```python
 sample = {'input_ids': [1, 2], 'labels': [1, 2]}
@@ -143,13 +143,13 @@ else:
 print('✅ 输入字段校验通过')
 ```
 
-## Q4：怎样逐条处理样本而不一次性复制全部数据？
+## Q4: How do you process samples one at a time without copying all data at once?
 
-列表适合立即得到全部结果；生成器适合按需读取较大的样本流。生成器仍应复用入口校验，并在失败信息中标出样本位置，避免惰性执行把错误来源隐藏起来。
+A list is suited to producing all results immediately; a generator is suited to reading a larger sample stream on demand. The generator should still reuse the entry-point validation and indicate the sample position in the failure message, so lazy execution does not hide the source of the error.
 
 ```python
 def iter_valid_records(records, required_fields):
-    """逐条生成校验后的浅拷贝；非法样本会报告其顺序位置。"""
+    """Yield validated shallow copies one at a time; invalid samples report their sequential position."""
     for position, record in enumerate(records):
         try:
             yield validate_record(record, required_fields)
@@ -165,9 +165,9 @@ record_stream = iter_valid_records(records, ('input_ids', 'labels'))
 print(list(record_stream))
 ```
 
-## Q4 验证：生成器是否惰性执行，并能定位非法样本？
+## Q4 verification: Does the generator execute lazily and locate invalid samples?
 
-创建生成器时不会立即遍历输入；消费结果后才执行字段校验。这里同时检查输出副本和带位置的失败信息。
+Creating the generator does not immediately traverse the input; field validation runs only when the results are consumed. This also checks the output copies and the positional failure message.
 
 ```python
 records = [
@@ -193,10 +193,10 @@ else:
 print('✅ 惰性样本处理通过')
 ```
 
-## 相关阅读
+## Related Reading
 
-掌握数据结构和函数契约后，继续学习数组维度、对象状态与实验配置。
+After mastering data structures and function contracts, continue with array dimensions, object state, and experiment configuration.
 
-- [02. NumPy and Einsum | NumPy 与 Einsum](./02_NumPy_and_Einsum.md)
-- [03. Python OOP and Utility Patterns | Python 面向对象与工具模式](./03_Python_OOP_and_Utility_Patterns.md)
-- [04. Python Config and Data Entry | Python 配置与数据入口](./04_Python_Config_and_Data_Entry.md)
+- [02. NumPy and Einsum](./02_NumPy_and_Einsum.md)
+- [03. Python OOP and Utility Patterns](./03_Python_OOP_and_Utility_Patterns.md)
+- [04. Python Config and Data Entry](./04_Python_Config_and_Data_Entry.md)

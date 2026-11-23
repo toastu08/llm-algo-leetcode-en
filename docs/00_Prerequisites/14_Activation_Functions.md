@@ -1,6 +1,6 @@
 # 14. Activation Functions | 激活函数
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `PyTorch`, `非线性`, `门控激活` | **目标人群：** 准备理解 MLP 与门控结构的学习者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `PyTorch`, `nonlinearity`, `gated activation` | **Audience:** learners preparing to understand MLPs and gated structures
 
 > 🚀 **云端运行环境**
 >
@@ -10,25 +10,25 @@
 > [![Open In Studio](https://img.shields.io/badge/Open%20In-ModelScope-blueviolet?logo=alibabacloud)](https://modelscope.cn/my/mynotebook) *(国内推荐：魔搭社区免费实例)*
 
 
-## 本节导读
+## Section Guide
 
-激活函数改变前向输出和局部梯度，并使多层线性变换不再退化为单个线性映射。在 Transformer MLP 中，激活可以位于单条投影路径，也可以参与 gate/value 两条分支的逐元素调制。
+Activation functions change the forward output and the local gradient, and keep a stack of linear transformations from degenerating into a single linear mapping. In a Transformer MLP, the activation can sit on a single projection path, or participate in element-wise modulation of the gate/value branches.
 
-完成本节后，你应能比较 ReLU、GELU、SiLU 的输出和局部梯度，并追踪普通 FFN 与门控 FFN 的 `H → H_ffn → H` shape 路径。
+After completing this section, you should be able to compare the outputs and local gradients of ReLU, GELU, and SiLU, and trace the `H → H_ffn → H` shape path of a plain FFN and a gated FFN.
 
-**关键词：** `ReLU`, `GELU`, `SiLU`, `SwiGLU`, `FFN`
+**Keywords:** `ReLU`, `GELU`, `SiLU`, `SwiGLU`, `FFN`
 
-![激活函数的输出、梯度与门控关系](../public/00_Prerequisites/14_activation_gradient_map.svg)
+![Activation output, gradient, and gating relationships](../public/00_Prerequisites/14_activation_gradient_map.svg)
 
-## 前置阅读
-**导语：** Tensor 运算给出前向值，Autograd 给出局部梯度；13 节则给出 MLP 分支写回 residual stream 的位置。
-- [07. PyTorch Autograd and Backward | PyTorch 自动求导与反向传播](./07_PyTorch_Autograd_and_Backward.md)
-- [13. Transformer Block Dataflow and Residual Stream | Transformer Block 数据流与残差通路](./13_Transformer_Block_Dataflow_and_Residual_Stream.md)
-- [0D 组页](./0D.md)
+## Prerequisite Reading
+**Overview:** Tensor operations give the forward values, Autograd gives the local gradients, and section 13 gives the position where the MLP branch writes back to the residual stream.
+- [07. PyTorch Autograd and Backward](./07_PyTorch_Autograd_and_Backward.md)
+- [13. Transformer Block Dataflow and Residual Stream](./13_Transformer_Block_Dataflow_and_Residual_Stream.md)
+- [0D Group Page](./0D.md)
 
-## Q1：激活函数在模型里解决什么问题？
+## Q1: What problem do activation functions solve in a model?
 
-没有激活函数，多层线性变换仍可合并成一个线性变换。ReLU、GELU 和 SiLU 都引入非线性，但它们对负值、零点附近和大正值的处理不同。
+Without an activation function, multiple layers of linear transformations can still be merged into a single linear transformation. ReLU, GELU, and SiLU all introduce nonlinearity, but they handle negative values, the region near zero, and large positive values differently.
 
 
 ```python
@@ -66,9 +66,9 @@ print('SiLU：', [round(v, 4) for v in silu(x).tolist()])
 
 ```
 
-## Q1 验证：不同激活的输出形态是否可见？
+## Q1 verification: Are the output shapes of the different activations visible?
 
-这里直接把同一组输入喂给不同激活，看看它们对负值、零值和正值的处理是否符合预期。
+Here the same set of inputs is fed directly to different activations to see whether their handling of negative, zero, and positive values matches expectations.
 
 
 ```python
@@ -80,14 +80,14 @@ print('✅ 基本激活函数通过')
 
 ```
 
-## Q2：输出形状相似时，梯度行为有什么不同？
+## Q2: When the output shapes are similar, how do the gradient behaviors differ?
 
-激活函数不仅改变输出，也改变局部导数。ReLU 在负半轴的梯度为零，在零点不可导；本例采用 PyTorch ReLU 的零点梯度约定，取值为 0。GELU 与 SiLU 在零点附近保留平滑变化。比较同一输入上的输出和梯度，比只记公式更能解释训练行为。
+An activation function changes not only the output but also the local derivative. ReLU has zero gradient on the negative half-axis and is not differentiable at zero; this example uses PyTorch ReLU's zero-point gradient convention, which is 0. GELU and SiLU retain smooth changes near zero. Comparing outputs and gradients on the same input explains training behavior better than remembering formulas alone.
 
 
 ```python
 def value_and_gradient(function, values):
-    """返回激活输出以及输出和对输入的梯度。"""
+    """Return the activation output and the gradient of the output with respect to the input."""
     inputs = values.clone().detach().requires_grad_(True)
     outputs = function(inputs)
     outputs.sum().backward()
@@ -101,9 +101,9 @@ for name, function in {'relu': relu, 'gelu': gelu_exact, 'silu': silu}.items():
 
 ```
 
-## Q2 验证：截断区与平滑区是否可观察？
+## Q2 verification: Are the cut-off region and the smooth region observable?
 
-检查 ReLU 负半轴梯度为零，同时确认 GELU 与 SiLU 的输出和梯度均保持有限。
+It checks that the ReLU gradient is zero on the negative half-axis, and confirms that the outputs and gradients of GELU and SiLU remain finite.
 
 
 ```python
@@ -121,14 +121,14 @@ print('✅ 激活输出与梯度通过')
 
 ```
 
-## Q3：激活函数怎样进入普通 FFN 与门控 FFN？
+## Q3: How do activation functions enter a plain FFN and a gated FFN?
 
-普通 FFN 先把 hidden 维扩张到 `H_ffn`，执行激活后再投影回 `H`。门控 FFN 同时生成 gate 与 value，两条分支必须拥有相同 shape；SwiGLU 用 `SiLU(gate) × value` 调制内容，再由 down projection 恢复 residual stream 的 hidden shape。
+A plain FFN first expands the hidden dimension to `H_ffn`, applies the activation, and then projects back to `H`. A gated FFN generates gate and value at the same time, and the two branches must have the same shape; SwiGLU uses `SiLU(gate) × value` to modulate the content, and the down projection then restores the hidden shape of the residual stream.
 
 
 ```python
 def swiglu(gate, value):
-    """使用 SiLU 门控 value 分支；两个输入必须同形状。"""
+    """Gate the value branch with SiLU; the two inputs must have the same shape."""
     if gate.shape != value.shape:
         raise ValueError('gate and value must have the same shape')
     return silu(gate) * value
@@ -163,9 +163,9 @@ print('input / dense / gated：', ffn_input.shape, dense_ffn(ffn_input).shape, g
 
 ```
 
-## Q3 验证：两类 FFN 是否都恢复 residual stream 的 hidden shape？
+## Q3 verification: Do both kinds of FFN restore the hidden shape of the residual stream?
 
-内部中间维可以扩张，但写回 Block 前必须恢复输入 shape；门控分支的 gate 与 value 不同形时应立即失败。
+The internal intermediate dimension can expand, but the input shape must be restored before writing back to the Block; when the gate and value of the gated branch do not have the same shape, it should fail immediately.
 
 
 ```python
@@ -187,14 +187,14 @@ print('✅ Dense FFN / Gated FFN shape contract 通过')
 
 ```
 
-## Q4：怎样用同一组统计比较激活函数的局部行为？
+## Q4: How do you compare the local behavior of activation functions with the same set of statistics?
 
-局部比较可以同时记录输出尺度、零值比例和梯度尺度。单看均值会漏掉 ReLU 的硬截断，也无法看出平滑激活是否保留负半轴梯度；这些统计用于描述机制，不直接替代模型训练和质量对照。
+A local comparison can record the output scale, the zero fraction, and the gradient scale at the same time. Looking only at the mean misses ReLU's hard cut-off and cannot show whether a smooth activation keeps gradients on the negative half-axis; these statistics describe the mechanism and do not directly replace model training and quality comparisons.
 
 
 ```python
 def activation_profile(function, values):
-    """汇总激活输出与局部梯度，不把统计量转换成预设标签。"""
+    """Summarize activation outputs and local gradients without converting statistics into preset labels."""
     outputs, gradients = value_and_gradient(function, values)
     return {
         'output_mean': float(outputs.mean()),
@@ -216,9 +216,9 @@ for name, profile in profiles.items():
 
 ```
 
-## Q4 验证：统计字段能否区分截断与平滑激活？
+## Q4 verification: Can the statistics distinguish cut-off from smooth activations?
 
-ReLU 应出现明显零值比例；GELU 与 SiLU 在该输入上不应产生同样的硬截断。所有统计必须保持有限。
+ReLU should show a clear zero fraction; GELU and SiLU should not produce the same hard cut-off on this input. All statistics must remain finite.
 
 
 ```python
@@ -231,11 +231,11 @@ print('✅ 激活统计对照通过')
 
 ```
 
-## 相关阅读
+## Related Reading
 
-继续观察归一化如何控制分支输入尺度，以及激活和门控怎样进入真实 Transformer Block。
+Continue by observing how normalization controls the scale of branch inputs, and how activations and gating enter a real Transformer Block.
 
-- [15. Normalization Techniques | 归一化技术](./15_Normalization_Techniques.md)
+- [15. Normalization Techniques](./15_Normalization_Techniques.md)
 - [Part 02 · 02 SwiGLU](../02_PyTorch_Algorithms/02_SwiGLU_Activation.md)
 - [Part 02 · 05 LLaMA3 Block](../02_PyTorch_Algorithms/05_LLaMA3_Block_Tutorial.md)
-- [大模型架构演进 · MLP / FFN 演进](../topic_discussion/llm_architecture_evolution/07_mlp_ffn_evolution.md)
+- [LLM Architecture Evolution · MLP / FFN evolution](../topic_discussion/llm_architecture_evolution/07_mlp_ffn_evolution.md)

@@ -1,8 +1,8 @@
 # PROGRESS.md — English Translation Progress
 
 > **Last updated:** 2026-11-23  
-> **Overall:** 16 / 472 source files translated (3.4%)  
-> **Current focus:** M1 Part 00 — `00-P` and `00-1` are complete; next is `00-2` (notebooks 11–20)
+> **Overall:** 26 / 472 source files translated (5.5%)  
+> **Current focus:** M1 (Part 00) is complete; next is M2 `01-P` (Part 01 prose and navigation)
 
 This file is the single source of truth for translation status. Update it
 after every file and every batch. Do not delete completed rows.
@@ -23,7 +23,7 @@ after every file and every batch. Do not delete completed rows.
 | ID | Milestone | Files | Translated | Reviewed | Blocked | Not started | % |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | M0 | Bootstrap and dry run | 0 | 0 | 0 | 0 | 0 | ✅ |
-| M1 | Part 00 — Prerequisites | 26 | 16 | 0 | 0 | 10 | 61.5% |
+| M1 | Part 00 — Prerequisites | 26 | 26 | 0 | 0 | 0 | 100% |
 | M2 | Part 01 — Hardware, Math, and Systems | 41 | 0 | 0 | 0 | 41 | 0% |
 | M3 | Part 02 — PyTorch Algorithms | 136 | 0 | 0 | 0 | 136 | 0% |
 | M4 | Part 03 — Triton Kernels | 26 | 0 | 0 | 0 | 26 | 0% |
@@ -34,7 +34,7 @@ after every file and every batch. Do not delete completed rows.
 | M9 | Docs-only pages | 14 | 0 | 0 | 0 | 14 | 0% |
 | M10 | Ancillary development and environment docs (optional) | 5 | 0 | 0 | 0 | 5 | 0% |
 | M11 | Regeneration and final QA | 0 | 0 | 0 | 0 | 0 | — |
-| **Total** | | **472** | **16** | **0** | **0** | **456** | **3.4%** |
+| **Total** | | **472** | **26** | **0** | **0** | **446** | **5.5%** |
 
 Update the counts as you go. A file counts as “Translated” only when it
 meets the definition of done in `AGENTS.md` §13. “Reviewed” means a second
@@ -42,16 +42,15 @@ agent checked it and confirmed the same criteria.
 
 ## Current focus
 
-**`00-P` and `00-1` are complete.** The prose pages and notebooks 01–10 are
-translated, and their docs mirrors were regenerated with
-`convert_notebook.py --file` (plus `sync_docs_navigation.py --part` for the
-prose pages).
+**M1 (Part 00) is complete.** All 26 Part 00 files are translated, and the whole
+`docs/00_Prerequisites/` mirror was rebuilt with
+`convert_notebook.py --dir 00_Prerequisites` and
+`sync_docs_navigation.py --part 00_Prerequisites`.
 
 Next focus:
 
-- Translate batch `00-2` (notebooks 11–20).
-- Then run the Part 00 batch checks, rebuild the remaining Part 00 mirrors, and
-  close M1.
+- Start M2 with batch `01-P` (Part 01 prose and navigation).
+- Then `01-A`, `01-B`, `01-C`.
 
 ### M0 dry-run notes
 
@@ -100,16 +99,16 @@ notes. Append `· reviewed`, `· blocked: reason`, or a short note as needed.
 
 #### 00-2 — Notebooks 11–20 (10 files, 13,508 CJK)
 
-- [ ] `00_Prerequisites/11_PyTorch_Optimizers_and_Loss.ipynb`
-- [ ] `00_Prerequisites/12_PyTorch_Minimal_Training_Interface.ipynb`
-- [ ] `00_Prerequisites/13_Transformer_Block_Dataflow_and_Residual_Stream.ipynb`
-- [ ] `00_Prerequisites/14_Activation_Functions.ipynb`
-- [ ] `00_Prerequisites/15_Normalization_Techniques.ipynb`
-- [ ] `00_Prerequisites/16_Attention_Mechanism_Intro.ipynb`
-- [ ] `00_Prerequisites/17_PyTorch_Profiling_Basics.ipynb`
-- [ ] `00_Prerequisites/18_Memory_Profiling_and_Optimization.ipynb`
-- [ ] `00_Prerequisites/19_Debugging_and_Anomaly_Localization.ipynb`
-- [ ] `00_Prerequisites/20_Performance_Evidence_and_Experiment_Design.ipynb`
+- [x] `00_Prerequisites/11_PyTorch_Optimizers_and_Loss.ipynb`
+- [x] `00_Prerequisites/12_PyTorch_Minimal_Training_Interface.ipynb`
+- [x] `00_Prerequisites/13_Transformer_Block_Dataflow_and_Residual_Stream.ipynb`
+- [x] `00_Prerequisites/14_Activation_Functions.ipynb`
+- [x] `00_Prerequisites/15_Normalization_Techniques.ipynb`
+- [x] `00_Prerequisites/16_Attention_Mechanism_Intro.ipynb`
+- [x] `00_Prerequisites/17_PyTorch_Profiling_Basics.ipynb`
+- [x] `00_Prerequisites/18_Memory_Profiling_and_Optimization.ipynb`
+- [x] `00_Prerequisites/19_Debugging_and_Anomaly_Localization.ipynb`
+- [x] `00_Prerequisites/20_Performance_Evidence_and_Experiment_Design.ipynb`
 
 ### M2 — Part 01 — Hardware, Math, and Systems (41 files, 55,676 CJK)
 
@@ -708,6 +707,7 @@ notes. Append `· reviewed`, `· blocked: reason`, or a short note as needed.
 | 2026-11-23 | OpenCode | M0 dry run (M1 `00-P`/`00-1`) | 2 | JSON/schema, AST, residual-CJK, structure | Conventions confirmed; code print/assert strings left Chinese per policy |
 | 2026-11-23 | OpenCode | M1 `00-P` (0A–0E) | 5 | Structure diff, residual-CJK, mirror check, chapter links | Zero residual CJK; heading/table/link counts match baseline; mirrors rebuilt for the six `00-P` pages |
 | 2026-11-23 | OpenCode | M1 `00-1` (02–10) | 9 | Structure diff, AST (docstrings normalized), cell metadata/outputs, residual-CJK scan, mirror check, chapter links | 0 CJK in markdown prose and 0 in code comments/docstrings; the 56 remaining markdown CJK characters are the required numbered H1 subtitles; no notebook outputs changed; mirrors rebuilt for the nine notebooks |
+| 2026-11-23 | OpenCode | M1 `00-2` (11–20) + M1 close-out | 10 | Structure diff, AST (docstrings normalized), cell metadata/outputs, residual-CJK scan, full Part 00 mirror rebuild, mirror and chapter-link checks, `verify.py` | 0 CJK in markdown prose and 0 in code comments/docstrings; remaining code CJK is print/assert literals plus the numbered H1 subtitles; `verify.py` reported 34 passed / 20 failed, all failures being `ModuleNotFoundError: numpy`/`torch` in this environment; out-of-scope mirrors rewritten by `verify.py` were reverted |
 
 ## Roadblocks and quirks
 
@@ -727,6 +727,8 @@ Pre-filled known items; add new ones as they appear.
 | Q10 | Code strings | Code-cell strings may be asserted elsewhere | Leave non-comment/non-docstring strings unchanged |
 | Q11 | Site chrome | VitePress nav/sidebar labels in `docs/.vitepress/config.mts` remain Chinese | Out of scope for this phase |
 | Q12 | Landing page | `README.md` and generated `docs/index.md` remain Chinese | English edition starts from tutorial pages; README already has an English section |
+| Q13 | `verify.py` side effects | `verify.py` runs `convert_chapter0_1.py` and `convert_notebook.py --dir 03/04`, rewriting `docs/01`, `docs/03`, and `docs/04` mirrors; it also executes notebooks | Run it only as a diagnostic, then revert out-of-scope mirror changes and re-check that notebook outputs are unchanged |
+| Q14 | Local Python env | The default interpreter here has no `numpy`/`torch`, so notebook-executing validators fail at import | Treat these as environment limitations, not translation defects; record the count |
 
 ## Decisions log
 

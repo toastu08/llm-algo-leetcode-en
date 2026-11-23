@@ -1,6 +1,6 @@
 # 11. PyTorch Optimizers and Loss | PyTorch 优化器与损失函数
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `PyTorch`, `损失函数`, `优化器` | **目标人群：** 准备理解训练更新机制的学习者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `PyTorch`, `loss`, `optimizer` | **Audience:** learners preparing to understand the training update mechanism
 
 > 🚀 **云端运行环境**
 >
@@ -10,25 +10,25 @@
 > [![Open In Studio](https://img.shields.io/badge/Open%20In-ModelScope-blueviolet?logo=alibabacloud)](https://modelscope.cn/my/mynotebook) *(国内推荐：魔搭社区免费实例)*
 
 
-## 本节导读
+## Section Guide
 
-损失函数把任务目标转换为可求导标量，优化器再把梯度、学习率和内部状态组合成参数更新。不同更新规则会保存不同状态并产生不同参数轨迹。
+The loss function turns the task objective into a differentiable scalar, and the optimizer then combines the gradient, learning rate, and internal state into a parameter update. Different update rules save different state and produce different parameter trajectories.
 
-完成本节后，你应能手算一次基本更新，解释优化器状态的作用，并判断梯度累计、参数更新和学习率推进是否位于正确时刻。
+After completing this section, you should be able to hand-compute a basic update, explain the role of the optimizer state, and determine whether gradient accumulation, parameter updates, and learning-rate advancement happen at the correct moments.
 
-**关键词：** `loss`, `SGD`, `AdamW`, `optimizer step`, `scheduler`
+**Keywords:** `loss`, `SGD`, `AdamW`, `optimizer step`, `scheduler`
 
-![梯度累积、优化器与调度器时序](../public/00_Prerequisites/11_optimizer_update_timeline.svg)
+![Gradient accumulation, optimizer, and scheduler timeline](../public/00_Prerequisites/11_optimizer_update_timeline.svg)
 
-## 前置阅读
-**导语：** 参数必须先注册到模型，反向传播也必须已经产生梯度，优化器才能执行更新。
-- [09. PyTorch nn.Module Basics | PyTorch nn.Module 基础](./09_PyTorch_nn_Module_Basics.md)
-- [08. PyTorch Grad Hygiene and No-Grad | PyTorch 梯度控制](./08_PyTorch_Grad_Hygiene_and_No_Grad.md)
-- [0C 组页](./0C.md)
+## Prerequisite Reading
+**Overview:** Parameters must first be registered in the model, and backward propagation must already have produced gradients, before the optimizer can perform an update.
+- [09. PyTorch nn.Module Basics](./09_PyTorch_nn_Module_Basics.md)
+- [08. PyTorch Grad Hygiene and No-Grad](./08_PyTorch_Grad_Hygiene_and_No_Grad.md)
+- [0C Group Page](./0C.md)
 
-## Q1：loss 和 optimizer 分别解决什么问题？
+## Q1: What problems do loss and optimizer solve respectively?
 
-回归和分类使用不同的目标契约，但都必须把一个 batch 的误差归约成标量，才能从该标量启动反向传播。优化器不定义任务目标，只消费参数上的梯度。
+Regression and classification use different target contracts, but both must reduce the error of a batch to a scalar before backward propagation can start from that scalar. The optimizer does not define the task objective; it only consumes the gradients on the parameters.
 
 
 ```python
@@ -38,12 +38,12 @@ import torch.nn.functional as F
 
 
 def mse_loss(pred, target):
-    # 回归任务里，loss 通常就是把误差压成一个标量。
+    # In a regression task, the loss usually reduces the error to a single scalar.
     return torch.mean((pred - target) ** 2)
 
 
 def cross_entropy_loss(logits, target):
-    # 分类任务里，logits 是未归一化分数，target 是类别 id。
+    # In a classification task, logits are unnormalized scores and target is the class id.
     return F.cross_entropy(logits, target)
 
 
@@ -57,9 +57,9 @@ print('CrossEntropy 示例：', cross_entropy_loss(logits, labels).item())
 
 ```
 
-## Q1 验证：基本 loss 的数值是否正确？
+## Q1 verification: Are the values of the basic losses correct?
 
-这里直接检查 MSE 和交叉熵的调用是否返回预期数值。
+Here it directly checks whether the MSE and cross-entropy calls return the expected values.
 
 
 ```python
@@ -76,14 +76,14 @@ print('✅ loss 基本验证通过')
 
 ```
 
-## Q2：SGD 的一次参数更新由哪些量决定？
+## Q2: Which quantities determine one SGD parameter update?
 
-最基础的 SGD 更新由当前参数、梯度和学习率决定；加入 momentum 后，优化器还要保存跨 step 的动量状态。先把手算结果与 PyTorch 更新对齐，才能分清参数、梯度与 optimizer state。
+The most basic SGD update is determined by the current parameters, the gradients, and the learning rate; with momentum, the optimizer must also save momentum state across steps. Only after aligning the hand-computed result with the PyTorch update can you clearly separate parameters, gradients, and optimizer state.
 
 
 ```python
 def manual_sgd_step(parameter, gradient, learning_rate):
-    """计算不含 momentum 和 weight decay 的一次 SGD 更新。"""
+    """Compute one SGD update without momentum and weight decay."""
     return parameter - learning_rate * gradient
 
 
@@ -96,9 +96,9 @@ print('更新后参数：', weight.item(), '手算结果：', expected.item())
 
 ```
 
-## Q2 验证：PyTorch SGD 是否与手算更新一致？
+## Q2 verification: Is PyTorch SGD consistent with the hand-computed update?
 
-无 momentum 时，两条更新路径应得到相同参数；启用 momentum 后，optimizer state 中应出现跨 step 保存的缓冲区。
+Without momentum, the two update paths should produce the same parameter; after enabling momentum, a buffer saved across steps should appear in the optimizer state.
 
 
 ```python
@@ -119,9 +119,9 @@ print('✅ SGD 更新与 momentum state 通过')
 
 ```
 
-## Q3：AdamW 为什么需要保存一阶、二阶矩状态？
+## Q3: Why does AdamW need to save first-order and second-order moment state?
 
-AdamW 不只读取当前梯度，还维护梯度的一阶矩与二阶矩估计，并独立应用 weight decay。这些状态解释了为什么完整 checkpoint 必须保存 optimizer state，也解释了优化器状态为何会增加训练内存。
+AdamW does not only read the current gradient; it also maintains first-order and second-order moment estimates of the gradient and applies weight decay independently. This state explains why a complete checkpoint must save the optimizer state, and why optimizer state increases training memory.
 
 
 ```python
@@ -138,9 +138,9 @@ print('step：', state['step'].item())
 
 ```
 
-## Q3 验证：AdamW 状态是否随 optimizer step 更新？
+## Q3 verification: Does the AdamW state update with optimizer steps?
 
-连续执行两个 step 后，步数、一阶矩和二阶矩都应存在，而且状态 shape 应与参数一致。
+After two consecutive steps, the step count, first moment, and second moment should all exist, and the state shapes should match the parameters.
 
 
 ```python
@@ -153,23 +153,23 @@ print('✅ AdamW optimizer state 通过')
 
 ```
 
-## Q4：micro-batch、optimizer step 与 scheduler step 如何对齐？
+## Q4: How do micro-batches, optimizer steps, and scheduler steps align?
 
-梯度可以跨多个 micro-batch 累积，但到达累计边界只表示发起一次更新尝试。只有参数更新成功时，optimizer-step 和 scheduler-step 才同时推进。本例各 micro-batch 样本数相同，最后一个窗口不足累计步数时，按实际窗口大小缩放损失；样本数不同时应按样本数加权。代码用给定布尔序列演示更新成功或跳过，并不检测真实混合精度溢出。
+Gradients can accumulate across multiple micro-batches, but reaching the accumulation boundary only means an update attempt is initiated. Only when the parameter update succeeds do optimizer-step and scheduler-step advance together. In this example every micro-batch has the same number of samples; when the last window has fewer than the accumulation step count, the loss is scaled by the actual window size; when the sample counts differ, the loss should be weighted by sample count. The code uses a given boolean sequence to demonstrate a successful or skipped update and does not detect real mixed-precision overflow.
 
-| 时钟 | 何时推进 | 代表什么 |
+| Clock | When it advances | What it represents |
 |:---|:---|:---|
-| micro-step | 每消费一个 micro-batch | 数据与反向传播进度 |
-| update attempt | 到达累计窗口边界 | 尝试应用当前累计梯度 |
-| optimizer-step | 执行一次未跳过的优化器更新 | 有效更新次数；零梯度时参数也可能不变 |
-| scheduler-step | optimizer-step 成功之后 | 学习率计划与有效更新对齐 |
+| micro-step | On consuming each micro-batch | Data and backward propagation progress |
+| update attempt | On reaching the accumulation window boundary | An attempt to apply the current accumulated gradients |
+| optimizer-step | On performing one optimizer update that was not skipped | Number of effective updates; the parameters may also be unchanged when the gradient is zero |
+| scheduler-step | After a successful optimizer-step | The learning-rate schedule aligns with effective updates |
 
 
 ```python
 def run_accumulated_updates(
     model, batches, optimizer, scheduler, accumulation_steps, update_success_pattern
 ):
-    """按累计边界执行 optimizer 与 scheduler，并返回可核对的时间线。"""
+    """Run optimizer and scheduler at accumulation boundaries and return a checkable timeline."""
     if accumulation_steps <= 0:
         raise ValueError('accumulation_steps must be positive')
     optimizer.zero_grad(set_to_none=True)
@@ -217,9 +217,9 @@ print(timeline)
 
 ```
 
-## Q4 验证：scheduler 是否只在参数更新后推进？
+## Q4 verification: Does the scheduler advance only after a parameter update?
 
-五个 micro-batch、每两个累计一次，会形成三次更新尝试；第二次尝试被跳过，因此只产生两次 optimizer-step 和两次 scheduler-step。最后一个窗口只有一个 micro-batch，其 loss 不再额外除以 2。
+Five micro-batches with one accumulation every two form three update attempts; the second attempt is skipped, so only two optimizer-steps and two scheduler-steps occur. The last window has only one micro-batch, and its loss is no longer divided by 2.
 
 
 ```python
@@ -236,9 +236,9 @@ print('✅ micro-batch / optimizer / scheduler 对齐通过')
 
 ```
 
-## Q5：为什么优化器需要 parameter groups？
+## Q5: Why does the optimizer need parameter groups?
 
-同一模型中的参数不一定共享更新规则。常见做法是对矩阵权重应用 weight decay，而让 bias 与归一化参数使用零衰减；parameter groups 把参数集合和各自的学习率、衰减系数绑定在一起。
+Parameters in the same model do not necessarily share the same update rule. A common practice is to apply weight decay to matrix weights while using zero decay for biases and normalization parameters; parameter groups bind a set of parameters to their own learning rate and decay coefficient.
 
 
 ```python
@@ -249,7 +249,7 @@ optimizer = torch.optim.AdamW([
     {'params': [bias], 'weight_decay': 0.0},
 ], lr=0.1)
 
-# 零梯度隔离了 weight decay 的影响，便于直接观察两组规则。
+# Zero gradients isolate the effect of weight decay, making the two rules directly observable.
 weight.grad = torch.zeros_like(weight)
 bias.grad = torch.zeros_like(bias)
 optimizer.step()
@@ -257,9 +257,9 @@ print('weight / bias：', weight.item(), bias.item())
 
 ```
 
-## Q5 验证：不同参数组是否执行了不同衰减规则？
+## Q5 verification: Do different parameter groups apply different decay rules?
 
-两组共享学习率，但只有 weight 所在组启用衰减；在零梯度条件下，weight 应缩小而 bias 保持不变。
+Both groups share the learning rate, but only the group containing weight enables decay; under zero gradients, weight should shrink while bias stays unchanged.
 
 
 ```python
@@ -272,8 +272,8 @@ print('✅ parameter groups 与 weight decay 规则通过')
 
 ```
 
-## 相关阅读
+## Related Reading
 
-掌握更新规则后，继续检查批次如何形成，以及更新规则如何进入完整训练循环。
+With the update rules mastered, continue by checking how batches are formed and how the update rules enter the complete training loop.
 
-- [12. PyTorch Data Interface and Training Lifecycle | PyTorch 数据接口与训练生命周期](./12_PyTorch_Minimal_Training_Interface.md)
+- [12. PyTorch Data Interface and Training Lifecycle](./12_PyTorch_Minimal_Training_Interface.md)

@@ -1,6 +1,6 @@
 # 16. Attention Mechanism Intro | Attention 机制导论
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `PyTorch`, `Attention`, `mask` | **目标人群：** 准备进入 Transformer 结构与优化内容的学习者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `PyTorch`, `Attention`, `mask` | **Audience:** learners preparing to enter Transformer structure and optimization content
 
 > 🚀 **云端运行环境**
 >
@@ -10,25 +10,25 @@
 > [![Open In Studio](https://img.shields.io/badge/Open%20In-ModelScope-blueviolet?logo=alibabacloud)](https://modelscope.cn/my/mynotebook) *(国内推荐：魔搭社区免费实例)*
 
 
-## 本节导读
+## Section Guide
 
-Attention 先用 Q/K 形成匹配分数，再经过可见性约束和 Softmax 得到读取权重，最后聚合 V。多头布局改变张量视图，序列长度和位置机制则限定标准 Attention 能表达和承载什么。
+Attention first uses Q/K to form match scores, then applies visibility constraints and Softmax to obtain read weights, and finally aggregates V. The multi-head layout changes the tensor view, while sequence length and positional mechanisms limit what standard Attention can express and carry.
 
-完成本节后，你应能追踪 Attention 的最小闭环，组合 causal 与 padding mask，并判断 self/cross Attention 和多头布局的 shape contract。
+After completing this section, you should be able to trace the minimal Attention loop, combine causal and padding masks, and determine the shape contract of self/cross Attention and the multi-head layout.
 
-**关键词：** `Q`, `K`, `V`, `mask`, `shape contract`
+**Keywords:** `Q`, `K`, `V`, `mask`, `shape contract`
 
-![Attention 的表示、可见性与聚合数据流](../public/00_Prerequisites/16_attention_dataflow_map.svg)
+![The representation, visibility, and aggregation dataflow of Attention](../public/00_Prerequisites/16_attention_dataflow_map.svg)
 
-## 前置阅读
-**导语：** 13 节给出 Attention 分支在 Block 中的位置，15 节说明分支读取 residual stream 前的统计控制；本页集中处理 token 间的信息聚合。
-- [13. Transformer Block Dataflow and Residual Stream | Transformer Block 数据流与残差通路](./13_Transformer_Block_Dataflow_and_Residual_Stream.md)
-- [15. Normalization Techniques | 归一化技术](./15_Normalization_Techniques.md)
-- [0D 组页](./0D.md)
+## Prerequisite Reading
+**Overview:** Section 13 gives the position of the Attention branch in the Block, and section 15 explains the statistical control before the branch reads the residual stream; this page focuses on information aggregation across tokens.
+- [13. Transformer Block Dataflow and Residual Stream](./13_Transformer_Block_Dataflow_and_Residual_Stream.md)
+- [15. Normalization Techniques](./15_Normalization_Techniques.md)
+- [0D Group Page](./0D.md)
 
-## Q1：Q/K/V 怎样组成完整 Attention 闭环？
+## Q1: How do Q/K/V form the complete Attention loop?
 
-Q 表示当前 token 的查询，K 提供匹配索引，V 提供被聚合的内容。实现时要连续追踪 `QKᵀ / √D_h → mask → softmax → weights × V`，而不是把四步拆成彼此无关的公式。
+Q represents the query of the current token, K provides the match index, and V provides the content being aggregated. When implementing, trace `QKᵀ / √D_h → mask → softmax → weights × V` continuously, instead of splitting the four steps into unrelated formulas.
 
 
 ```python
@@ -80,9 +80,9 @@ print(output)
 
 ```
 
-## Q1 验证：匹配权重和 V 聚合是否同时正确？
+## Q1 verification: Are the match weights and the V aggregation both correct?
 
-因果约束下，第一个 query 只能读取第一个 value；第二个 query 可以读取两个位置。权重与输出都应保持预期 shape，并与 PyTorch 参考实现一致。
+Under the causal constraint, the first query can only read the first value; the second query can read both positions. The weights and output should both keep the expected shapes and match the PyTorch reference implementation.
 
 
 ```python
@@ -101,14 +101,14 @@ print('✅ Q/K 匹配与 V 聚合闭环通过')
 
 ```
 
-## Q2：可见性 mask 与稳定 Softmax 怎样共同工作？
+## Q2: How do the visibility mask and a stable Softmax work together?
 
-自回归 Attention 用 causal mask 遮蔽未来 token，padding mask 排除补齐的无效 key；两类约束可组合成 `[batch, heads, query_length, key_length]` 的可见性 mask。Softmax 前减去行最大值可避免指数溢出，全遮蔽行则应返回有限的零权重。
+Autoregressive Attention uses a causal mask to hide future tokens, and a padding mask to exclude padded invalid keys; the two constraints can be combined into a `[batch, heads, query_length, key_length]` visibility mask. Subtracting the row maximum before Softmax avoids exponential overflow, and a fully masked row should return finite zero weights.
 
 
 ```python
 def build_attention_mask(key_padding_mask, query_length, causal):
-    """构造可广播到多头分数的 [B, 1, S_q, S_k] 可见性 mask。"""
+    """Build a [B, 1, S_q, S_k] visibility mask that can broadcast to multi-head scores."""
     batch_size, key_length = key_padding_mask.shape
     visible = key_padding_mask[:, None, None, :].expand(batch_size, 1, query_length, key_length)
     if causal:
@@ -130,9 +130,9 @@ print('masked probabilities：', probs)
 
 ```
 
-## Q2 验证：mask 语义、广播 shape 和概率归一化是否正确？
+## Q2 verification: Are the mask semantics, broadcast shape, and probability normalization correct?
 
-因果约束应形成下三角可见性，padding 位置始终不可读；存在可见项的行权重和为 1，全遮蔽行保持有限并返回全零。
+The causal constraint should form lower-triangular visibility, and padding positions should always be unreadable; rows with visible entries sum to 1, and fully masked rows stay finite and return all zeros.
 
 
 ```python
@@ -155,14 +155,14 @@ print('✅ causal/padding mask 与稳定 Softmax 通过')
 
 ```
 
-## Q3：自注意力与交叉注意力的 shape contract 有什么不同？
+## Q3: How do the shape contracts of self-attention and cross-attention differ?
 
-两者都要求 batch、head 和 Q/K 特征维可以完成矩阵乘法，K 与 V 还必须共享来源序列长度。自注意力通常满足 `S_q = S_k = S_v`；交叉注意力允许查询序列长度 `S_q` 与来源序列长度 `S_k` 不同，因此不能把“所有序列长度相同”写成通用契约。
+Both require the batch, head, and Q/K feature dimensions to support matrix multiplication, and K and V must also share the source sequence length. Self-attention usually satisfies `S_q = S_k = S_v`; cross-attention allows the query sequence length `S_q` to differ from the source sequence length `S_k`, so "all sequence lengths are the same" cannot be written as a general contract.
 
 
 ```python
 def attention_contract_ok(q_shape, k_shape, v_shape, mode):
-    """检查 [B, H, S, D] 形式的自注意力或交叉注意力契约。"""
+    """Check a [B, H, S, D]-style self-attention or cross-attention contract."""
     if mode not in {'self', 'cross'}:
         return False
     if any(len(shape) != 4 or any(type(size) is not int or size <= 0 for size in shape)
@@ -180,9 +180,9 @@ print('self contract：', attention_contract_ok((2, 4, 8, 16), (2, 4, 8, 16), (2
 print('cross contract：', attention_contract_ok((2, 4, 3, 16), (2, 4, 8, 16), (2, 4, 8, 32), mode='cross'))
 ```
 
-## Q3 验证：Self / cross attention 的合法与非法 shape 能否区分？
+## Q3 verification: Can valid and invalid shapes of self / cross attention be distinguished?
 
-Self-attention 要求查询与来源序列长度一致；cross-attention 允许二者不同，但 K/V 的来源长度必须一致。
+Self-attention requires the query and source sequence lengths to match; cross-attention allows them to differ, but the K/V source lengths must match.
 
 
 ```python
@@ -195,14 +195,14 @@ print('✅ self / cross attention shape contract 通过')
 
 ```
 
-## Q4：多头 Attention 怎样在 head 维和 hidden 维之间转换？
+## Q4: How does multi-head Attention convert between the head dimension and the hidden dimension?
 
-多头 Attention 把 `[B, S, D]` 拆成 `[B, H, S, D_h]`，让不同 head 独立计算，再把结果合回 hidden 维。拆分与合并必须保持元素顺序和总维度不变；这一布局契约也是后续阅读 GQA、FlashAttention 和 fused kernel 的基础。
+Multi-head Attention splits `[B, S, D]` into `[B, H, S, D_h]`, lets different heads compute independently, and merges the results back into the hidden dimension. Splitting and merging must preserve the element order and total dimension; this layout contract is also the basis for later reading about GQA, FlashAttention, and fused kernels.
 
 
 ```python
 def split_heads(x, num_heads):
-    """把 [B, S, D] 转成 [B, H, S, D_h]。"""
+    """Turn [B, S, D] into [B, H, S, D_h]."""
     batch_size, seq_len, hidden_size = x.shape
     if hidden_size % num_heads != 0:
         raise ValueError('hidden_size must be divisible by num_heads')
@@ -211,7 +211,7 @@ def split_heads(x, num_heads):
 
 
 def merge_heads(x):
-    """把 [B, H, S, D_h] 合回 [B, S, D]。"""
+    """Merge [B, H, S, D_h] back into [B, S, D]."""
     batch_size, num_heads, seq_len, head_dim = x.shape
     return x.transpose(1, 2).contiguous().view(batch_size, seq_len, num_heads * head_dim)
 
@@ -224,9 +224,9 @@ print('round trip:', torch.equal(restored, x))
 
 ```
 
-## Q4 验证：手写多头数据流是否与 PyTorch 参考实现一致？
+## Q4 verification: Is the hand-written multi-head dataflow consistent with the PyTorch reference implementation?
 
-除布局往返外，还应比较每个 head 的手写 Attention 与 `scaled_dot_product_attention`，确认分数缩放、softmax 和 V 聚合没有发生语义偏差。
+Besides the layout round-trip, you should compare the hand-written Attention of each head with `scaled_dot_product_attention` to confirm that score scaling, softmax, and V aggregation have no semantic deviation.
 
 
 ```python
@@ -244,14 +244,14 @@ print('✅ 多头布局与 PyTorch SDPA 对照通过')
 
 ```
 
-## Q5：标准 Attention 还没有解决哪两个问题？
+## Q5: Which two problems does standard Attention still not solve?
 
-每个 query 都与全部 key 形成分数，因此 score 矩阵随序列长度按平方增长。另一方面，若不加入位置编码或位置偏置，自注意力只根据内容匹配；同步打乱 token 顺序只会同步打乱输出，模型无法仅凭 Attention 区分原始次序。
+Every query forms scores with all keys, so the score matrix grows quadratically with sequence length. On the other hand, without position encoding or positional bias, self-attention matches only by content; permuting the token order in the same way only permutes the output in the same way, and the model cannot distinguish the original order from Attention alone.
 
 
 ```python
 def attention_score_elements(batch_size, num_heads, seq_len):
-    """返回标准自注意力分数张量 [B, H, S, S] 的元素数。"""
+    """Return the number of elements of the standard self-attention score tensor [B, H, S, S]."""
     return batch_size * num_heads * seq_len * seq_len
 
 
@@ -267,9 +267,9 @@ print('score elements：', short_scores, '->', long_scores)
 
 ```
 
-## Q5 验证：长度翻倍和顺序置换是否符合机制预期？
+## Q5 verification: Do doubling the length and permuting the order match the mechanism's expectations?
 
-序列长度翻倍时分数元素数应变为四倍；没有位置机制时，置换输入后输出只发生同样的置换。
+When the sequence length doubles, the number of score elements should become four times larger; without a positional mechanism, permuting the input only permutes the output in the same way.
 
 
 ```python
@@ -279,12 +279,12 @@ print('✅ Attention 二次增长与位置缺失特性通过')
 
 ```
 
-## 相关阅读
+## Related Reading
 
-掌握最小 Attention 语义后，再分别进入位置、注意力表示、显存与推理状态问题。
+With the minimal Attention semantics mastered, continue with position, attention representation, memory, and inference-state problems separately.
 
-- [Part 01 · 04 Attention Memory Optimization | Attention 显存优化](../01_Hardware_Math_and_Systems/04_Attention_Memory_Optimization.md)
-- [Part 02 · 03 RoPE 旋转位置编码](../02_PyTorch_Algorithms/03_RoPE_Tutorial.md)
+- [Part 01 · 04 Attention Memory Optimization](../01_Hardware_Math_and_Systems/04_Attention_Memory_Optimization.md)
+- [Part 02 · 03 RoPE rotary position encoding](../02_PyTorch_Algorithms/03_RoPE_Tutorial.md)
 - [Part 02 · 04 MHA / GQA](../02_PyTorch_Algorithms/04_Attention_MHA_GQA.md)
 - [Part 02 · 22 vLLM PagedAttention](../02_PyTorch_Algorithms/22_vLLM_PagedAttention.md)
-- [大模型架构演进 · 注意力表示与 KV Cache](../topic_discussion/llm_architecture_evolution/04_attention_evolution.md)
+- [LLM Architecture Evolution · attention representation and KV Cache](../topic_discussion/llm_architecture_evolution/04_attention_evolution.md)

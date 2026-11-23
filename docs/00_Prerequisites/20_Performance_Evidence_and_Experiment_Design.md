@@ -1,6 +1,6 @@
 # 20. Performance Evidence and Experiment Design | 性能证据汇总与实验设计
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `性能证据`, `比较基线`, `实验设计` | **目标人群：** Part 2-4 前置补课者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `performance evidence`, `comparison baseline`, `experiment design` | **Audience:** learners preparing for Parts 2–4
 
 > 🚀 **云端运行环境**
 >
@@ -10,37 +10,37 @@
 > [![Open In Studio](https://img.shields.io/badge/Open%20In-ModelScope-blueviolet?logo=alibabacloud)](https://modelscope.cn/my/mynotebook) *(国内推荐：魔搭社区免费实例)*
 
 
-## 本节导读
+## Section Guide
 
-本节沿用运行有效性、时间测量和内存账本的记录方式，用一组明确构造的示例练习实验设计。真实比较还需要确认这些记录来自同一工作负载。运行无效时先停止性能解释；运行有效时才形成待验证假设。
+This section follows the recording style of run validity, time measurement, and the memory ledger, and practices experiment design with a set of explicitly constructed examples. A real comparison also needs to confirm that these records come from the same workload. When the run is invalid, stop interpreting performance first; only when the run is valid do you form a hypothesis to be tested.
 
-完成后，你应能从已有观测提出可验证假设，设计只改变一个条件的对照，并根据重复测量、失败记录和质量门槛决定接受、复测或拒绝候选。
+After completing this section, you should be able to propose a testable hypothesis from existing observations, design a comparison that changes only one condition, and decide whether to accept, re-measure, or reject the candidate based on repeated measurements, failure records, and quality gates.
 
-**关键词：** `比较基线`, `待验证假设`, `单变量实验`, `失败率`
+**Keywords:** `comparison baseline`, `hypothesis to be tested`, `single-variable experiment`, `failure rate`
 
-![性能证据汇总与实验设计](../public/00_Prerequisites/20_performance_evidence_experiment_map.svg)
+![Performance evidence summary and experiment design](../public/00_Prerequisites/20_performance_evidence_experiment_map.svg)
 
-## 前置阅读
-**导语：** 先完成 19 的运行有效性检查，再从 17 和 18 取得时间与容量证据；在本页用构造示例汇总记录、提出假设和设计对照。
-- [19. Debugging and Anomaly Localization | 调试与异常定位](./19_Debugging_and_Anomaly_Localization.md)
-- [17. PyTorch Profiling Basics | PyTorch 性能分析基础](./17_PyTorch_Profiling_Basics.md)
-- [18. Memory Accounting and Runtime Evidence | 显存账本与运行时证据](./18_Memory_Profiling_and_Optimization.md)
+## Prerequisite Reading
+**Overview:** First complete the run validity check in 19, then obtain time and capacity evidence from 17 and 18; on this page, use constructed examples to summarize records, propose hypotheses, and design comparisons.
+- [19. Debugging and Anomaly Localization](./19_Debugging_and_Anomaly_Localization.md)
+- [17. PyTorch Profiling Basics](./17_PyTorch_Profiling_Basics.md)
+- [18. Memory Accounting and Runtime Evidence](./18_Memory_Profiling_and_Optimization.md)
 
-## Q1：为什么正确性门槛必须先于性能解释？
+## Q1: Why must the correctness gate come before performance interpretation?
 
-耗时更短并不代表结果可用：输出错误、出现 NaN 或梯度链路中断时，任何性能收益都没有解释价值。20 节首先读取 19 输出的有效性结论；只有 `run_valid=True` 才允许时间和容量证据进入下一步，失败时保留首个失败点和复现状态。
+A shorter elapsed time does not mean the result is usable: when the output is wrong, NaN appears, or the gradient chain is broken, no performance gain has interpretive value. Section 20 first reads the validity conclusion output by 19; only when `run_valid=True` are time and capacity evidence allowed to move to the next step, and on failure the first failure point and reproduction state are kept.
 
-| 有效性字段 | 它回答的问题 | 下一步 |
+| Validity field | Question it answers | Next step |
 |:---|:---|:---|
-| run_valid | 当前结果是否满足正确性要求？ | false 时停止性能解释 |
-| issues | 哪类契约、数值或梯度检查失败？ | 进入对应定位路径 |
-| first_failure | 最早失败发生在哪里？ | 收缩复现范围 |
-| reproducible | 问题能否稳定重放？ | 决定继续定位或补充触发条件 |
+| run_valid | Does the current result meet the correctness requirements? | Stop performance interpretation when false |
+| issues | Which kind of contract, numerical, or gradient check failed? | Enter the corresponding localization path |
+| first_failure | Where did the earliest failure occur? | Shrink the reproduction scope |
+| reproducible | Can the problem be replayed stably? | Decide whether to continue localizing or add trigger conditions |
 
 
 ```python
 def validate_validity_report(report):
-    """检查正确性状态与异常列表是否一致，再决定是否继续。"""
+    """Check that the correctness status and the issue list agree, then decide whether to continue."""
     required = {'evidence_type', 'status', 'run_valid', 'issues', 'first_failure', 'reproducible'}
     missing = sorted(required - set(report))
     if missing:
@@ -79,7 +79,7 @@ print('invalid:', validity_failed)
 
 ```
 
-## Q1 验证：有效性门槛是否阻止无效运行进入性能解释？
+## Q1 verification: Does the validity gate prevent invalid runs from entering performance interpretation?
 
 ```python
 assert validity_ok['performance_action'] == 'continue'
@@ -98,16 +98,15 @@ for invalid_change in (
 print('✅ 正确性状态、异常列表一致性与停止条件通过')
 ```
 
-## Q2：如何接收时间与容量证据而不重复采集？
+## Q2: How do you accept time and capacity evidence without collecting it again?
 
-前面的计时练习提供测量范围、重复样本和阶段热点，内存练习提供估算对象与构造快照。这里不读取其他 Notebook 的变量，而是构造同一工作负载的记录来检验汇总规则。阶段占比使用互不嵌套、互不重叠的阶段时间之和；真实事件有重叠时，应先整理时间线，不能直接相加。
+The earlier timing exercise provides the measurement scope, repeated samples, and stage hotspots, and the memory exercise provides the estimated objects and constructed snapshots. Here it does not read variables from other notebooks; instead it constructs records of the same workload to check the summary rules. The stage shares use the sum of non-nested, non-overlapping stage times; when real events overlap, you should organize the timeline first and must not add them directly.
 
-| 证据来源 | 最小输入 | 20 节的用途 |
+| Evidence source | Minimal input | Use in section 20 |
 |:---|:---|:---|
-| 时间记录结构 | workload、samples、hotspot、测量范围 | 选择最值得展开的阶段 |
-| 内存记录结构 | 估算或实测标记、容量预算、主要对象、对账结果 | 判断是否存在容量压力 |
-| 正确性记录结构 | run_valid、issues、first failure | 决定是否允许继续解释 |
-
+| Time record structure | workload, samples, hotspot, measurement scope | Choose the stage most worth expanding |
+| Memory record structure | estimated or measured flag, capacity budget, main objects, reconciliation result | Determine whether capacity pressure exists |
+| Correctness record structure | run_valid, issues, first failure | Decide whether interpretation may continue |
 
 
 ```python
@@ -115,10 +114,10 @@ import math
 
 
 def top_hotspots(events, topk=2):
-    """按阶段总耗时排序，并补充其在总时间中的占比。
+    """Sort by stage total time and add each stage's share of the total time.
 
-    events 中每项需要包含 name、total_ms 和 calls；这里处理的是
-    已经整理好的事件记录，不负责从 profiler 采集原始事件。
+    Each entry in events needs name, total_ms, and calls; this handles
+    already organized event records and does not collect raw events from the profiler.
     """
     if not isinstance(events, list) or not events or topk <= 0:
         return []
@@ -163,11 +162,11 @@ memory_evidence = {
 evidence_bundle = {'validity': validity_ok, 'time': time_evidence, 'memory': memory_evidence}
 print('hotspots:', hotspots)
 print('focus:', hotspots[0]['name'])
-# 输出示例: hotspots -> [('backward', 74), ('dataloader', 52)], focus -> backward
+# Output example: hotspots -> [('backward', 74), ('dataloader', 52)], focus -> backward
 
 ```
 
-## Q2 验证：时间与容量证据是否保留来源和解释边界？
+## Q2 verification: Do the time and capacity evidence retain their source and interpretation limits?
 
 ```python
 assert [item['name'] for item in hotspots] == ['backward', 'dataloader']
@@ -182,20 +181,20 @@ assert time_evidence['workload'] == memory_evidence['workload']
 print('✅ 构造示例、测量范围与热点汇总检查通过')
 ```
 
-## Q3：如何把时间、容量与正确性证据合成一个可验证假设？
+## Q3: How do you combine time, capacity, and correctness evidence into one testable hypothesis?
 
-先检查运行有效性，再检查时间和内存记录是否属于同一工作负载，以及它们是实测还是构造示例。正确性失败时应先停止性能解释；结果可信后，再根据事先声明的告警阈值判断当前证据是否足以形成实验假设。这里选择的是待验证信号，不直接宣布计算、带宽或 I/O 根因。
+First check run validity, then check whether the time and memory records belong to the same workload and whether they are measured or constructed examples. When correctness fails, stop performance interpretation first; once the results are credible, use the pre-declared alert thresholds to judge whether the current evidence is sufficient to form an experiment hypothesis. What is chosen here is a signal to be tested; no compute, bandwidth, or I/O root cause is declared directly.
 
-| 证据来源 | 输入字段 | 汇总后的作用 |
+| Evidence source | Input fields | Role after summarization |
 |:---|:---|:---|
-| 时间证据 | hotspot、stage share | 判断哪个阶段值得展开 |
-| 容量证据 | dominant object、peak / capacity | 判断是否接近容量上限 |
-| 正确性证据 | run_valid、issues、first failure | 决定性能结果能否继续解释 |
+| Time evidence | hotspot, stage share | Determine which stage is worth expanding |
+| Capacity evidence | dominant object, peak / capacity | Determine whether the capacity limit is close |
+| Correctness evidence | run_valid, issues, first failure | Decide whether performance results may continue to be interpreted |
 
 
 ```python
 def synthesize_evidence(bundle, capacity_alert_ratio=0.90, hotspot_alert_share_pct=40.0):
-    """先执行正确性检查，再整理同一工作负载下的时间和内存信号。"""
+    """Run the correctness check first, then summarize time and memory signals under the same workload."""
     if 'validity' not in bundle:
         raise KeyError('缺少 validity')
     validity = validate_validity_report(bundle['validity'])
@@ -262,7 +261,7 @@ input_bundle = {
     'memory': {**memory_evidence, 'reserved_mib': 24},
 }
 input_evidence = synthesize_evidence(input_bundle)
-# 运行无效时，无须先提供性能记录。
+# When the run is invalid, performance records do not need to be provided first.
 invalid_evidence = synthesize_evidence({'validity': validity_failed})
 print('capacity:', capacity_evidence)
 print('input:', input_evidence)
@@ -270,7 +269,7 @@ print('invalid:', invalid_evidence)
 
 ```
 
-## Q3 验证：正确性门槛、容量压力与时间热点能否正确分流？
+## Q3 verification: Can the correctness gate, capacity pressure, and time hotspots be routed correctly?
 
 ```python
 assert capacity_evidence['primary_signal'] == 'memory'
@@ -292,24 +291,24 @@ else:
 print('✅ 正确性优先、来源标记与同工作负载检查通过')
 ```
 
-## Q4：如何把证据假设变成可判断的单变量实验？
+## Q4: How do you turn an evidence hypothesis into a decidable single-variable experiment?
 
-每次实验先固定模型、输入、batch、dtype、设备、重复次数和测量方法，再由学习者显式提交一个候选变化。运行后分别保存基线与候选的重复样本，单独记录失败运行，再比较中位数、P95、失败率和质量。先固定可接受的失败率上限与 P95 回退上限，再检查中位数收益是否超过最小收益阈值和基线波动。失败样本不能从分母中消失。示例用 `(P95 - median) / median` 作为教学用波动代理，它不是统计置信区间，真实项目需要更多样本和独立回归协议。
+For each experiment, first fix the model, input, batch, dtype, device, repeat count, and measurement method, and then the learner explicitly submits one candidate change. After running, keep the repeated samples of the baseline and the candidate separately, record failed runs separately, and then compare the median, P95, failure rate, and quality. First fix the acceptable failure-rate ceiling and the P95 regression ceiling, then check whether the median gain exceeds the minimum improvement threshold and the baseline jitter. Failed samples must not disappear from the denominator. The example uses `(P95 - median) / median` as a teaching proxy for jitter; it is not a statistical confidence interval, and real projects need more samples and an independent regression protocol.
 
-| 实验字段 | 需要记录的内容 |
+| Experiment field | What to record |
 |:---|:---|
-| hypothesis | 哪个信号值得用实验验证 |
-| fixed conditions | 模型、输入、设备、测量方法及其他未改变的配置 |
-| single change | 基线与候选唯一不同的变量 |
-| repeated samples | 基线与候选的成功样本和失败运行 |
-| metrics | 常规中位数、最近秩 P95、失败率、质量与资源代价 |
-| regression threshold | 最小收益与基线波动两者的较大值，以及失败率和 P95 上限 |
-| decision | accept、reject 或 rerun，并保留原因 |
+| hypothesis | Which signal is worth verifying with an experiment |
+| fixed conditions | Model, input, device, measurement method, and other unchanged settings |
+| single change | The only variable that differs between baseline and candidate |
+| repeated samples | Successful samples and failed runs of the baseline and candidate |
+| metrics | Regular median, nearest-rank P95, failure rate, quality, and resource cost |
+| regression threshold | The larger of the minimum gain and the baseline jitter, plus the failure-rate and P95 ceilings |
+| decision | accept, reject, or rerun, with the reason retained |
 
 
 ```python
 def design_single_variable_experiment(evidence, baseline, candidate_change=None):
-    """固定 baseline，并校验 candidate_change 只改变一个变量。"""
+    """Fix the baseline and check that candidate_change changes only one variable."""
     required = {'model', 'input_shape', 'batch_size', 'dtype', 'device', 'repeats', 'measurement_method'}
     missing = sorted(required - set(baseline))
     if missing:
@@ -388,14 +387,14 @@ print('blocked plan:', blocked_plan)
 
 ```
 
-## Q4 验证：单变量约束、失败运行与回归阈值是否同时生效？
+## Q4 verification: Do the single-variable constraint, failed runs, and regression thresholds all take effect?
 
 ```python
 import statistics
 
 
 def changed_keys(plan):
-    """返回基线与候选之间真正变化的配置项。"""
+    """Return the configuration items that actually differ between baseline and candidate."""
     if plan['candidate'] is None:
         return []
     keys = set(plan['baseline']) | set(plan['candidate'])
@@ -403,7 +402,7 @@ def changed_keys(plan):
 
 
 def percentile(values, fraction):
-    """按最近秩计算 P95 等分位数，中位数使用 statistics.median。"""
+    """Compute quantiles such as P95 by nearest rank; the median uses statistics.median."""
     if not values or not 0 <= fraction <= 1:
         raise ValueError('values 不能为空，fraction 必须位于 [0, 1]')
     if any(not math.isfinite(value) or value <= 0 for value in values):
@@ -413,7 +412,7 @@ def percentile(values, fraction):
 
 
 def summarize_repeated_runs(runs):
-    """保留全部尝试作为失败率分母，只对成功样本汇总延迟和平均质量。"""
+    """Keep every attempt in the failure-rate denominator and summarize latency and mean quality over successful samples only."""
     if any(type(run.get('ok')) is not bool for run in runs):
         raise ValueError('每次运行必须声明布尔型 ok')
     successful = [run for run in runs if run['ok']]
@@ -438,7 +437,7 @@ def summarize_repeated_runs(runs):
 
 def evaluate_regression(baseline_runs, candidate_runs, min_valid_runs=5, min_improvement=0.05,
                         quality_tolerance=0.01, maximum_failure_rate=0.0, maximum_p95_ratio=1.05):
-    """按声明的成功次数、失败率、质量、P95 和中位数收益逐项检查。"""
+    """Check each declared item: valid-run count, failure rate, quality, P95, and median gain."""
     if type(min_valid_runs) is not int or min_valid_runs <= 0:
         raise ValueError('min_valid_runs 必须为正整数')
     thresholds = (min_improvement, quality_tolerance, maximum_failure_rate, maximum_p95_ratio)
@@ -475,7 +474,7 @@ def evaluate_regression(baseline_runs, candidate_runs, min_valid_runs=5, min_imp
     }
 
 
-# 构造数据只验证规则，不代表已经运行 TinyLM 或某项优化策略。
+# The constructed data only checks the rules; it does not mean TinyLM or any optimization strategy has been run.
 baseline_runs = [{'ok': True, 'latency_ms': value, 'quality': 0.900}
                  for value in (100, 102, 99, 101, 100)]
 clean_candidate = [{'ok': True, 'latency_ms': value, 'quality': 0.895}
@@ -512,8 +511,9 @@ print('✅ 单变量、失败率、质量、P95 与统计量反例检查通过')
 
 ```
 
-## 相关阅读
-**导语：** 完成本节后，可以进入性能归因页或专题路线，将这里的实验协议用于真实证据。
-- [Part 01 · 13 性能分析与瓶颈归因](../01_Hardware_Math_and_Systems/13_Profiling_and_Bottleneck_Analysis.md)
-- [性能分析专题](../topic_discussion/performance_analysis/intro.md)
-- [PyTorch Profiler 官方教程](https://docs.pytorch.org/tutorials/recipes/recipes/profiler_recipe.html)
+## Related Reading
+**Overview:** After completing this section, you can enter the performance attribution page or the topic route, and apply this experiment protocol to real evidence.
+- [Part 01 · 13 Profiling and Bottleneck Attribution](../01_Hardware_Math_and_Systems/13_Profiling_and_Bottleneck_Analysis.md)
+- [Performance Analysis topic](../topic_discussion/performance_analysis/intro.md)
+- [PyTorch Profiler official tutorial](https://docs.pytorch.org/tutorials/recipes/recipes/profiler_recipe.html)
+

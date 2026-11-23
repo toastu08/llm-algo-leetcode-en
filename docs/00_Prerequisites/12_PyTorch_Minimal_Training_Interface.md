@@ -1,6 +1,6 @@
 # 12. PyTorch Minimal Training Interface | PyTorch 数据接口与训练生命周期
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `PyTorch`, `batch 契约`, `训练生命周期` | **目标人群：** 准备把数据入口与模型更新接成训练闭环的学习者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `PyTorch`, `batch contract`, `training lifecycle` | **Audience:** learners preparing to connect the data entry point and model updates into a training loop
 
 > 🚀 **云端运行环境**
 >
@@ -10,24 +10,24 @@
 > [![Open In Studio](https://img.shields.io/badge/Open%20In-ModelScope-blueviolet?logo=alibabacloud)](https://modelscope.cn/my/mynotebook) *(国内推荐：魔搭社区免费实例)*
 
 
-## 本节导读
+## Section Guide
 
-训练生命周期从原始样本开始，经过分词、批次组装、模型计算、损失、反向传播和参数更新，最后进入独立验证与指标评价。任一接口不一致都会使错误沿后续阶段传播。
+The training lifecycle starts from raw samples, goes through tokenization, batch assembly, model computation, loss, backward propagation, and parameter updates, and finally enters independent validation and metric evaluation. Any inconsistent interface will let errors propagate through the subsequent stages.
 
-完成本节后，你应能追踪单样本如何成为模型输入，检查训练与验证边界，并确认评价指标按完整样本集合汇总。
+After completing this section, you should be able to trace how a single sample becomes model input, check the training and validation boundaries, and confirm that evaluation metrics are aggregated over the complete sample set.
 
-**关键词：** `Dataset`, `DataLoader`, `batch contract`, `train/validate`, `evaluation metrics`
+**Keywords:** `Dataset`, `DataLoader`, `batch contract`, `train/validate`, `evaluation metrics`
 
-![从单样本到模型输入的 batch 契约](../public/00_Prerequisites/12_batch_contract_map.svg)
+![The batch contract from a single sample to model input](../public/00_Prerequisites/12_batch_contract_map.svg)
 
-## 前置阅读
-**导语：** 先回顾优化器与损失函数如何消费模型输出，再从本页建立训练循环的数据入口。
-- [11. PyTorch Optimizers and Loss | PyTorch 优化器与损失函数](./11_PyTorch_Optimizers_and_Loss.md)
-- [0C 组页](./0C.md)
+## Prerequisite Reading
+**Overview:** First review how the optimizer and loss function consume model outputs, then establish the data entry point of the training loop on this page.
+- [11. PyTorch Optimizers and Loss](./11_PyTorch_Optimizers_and_Loss.md)
+- [0C Group Page](./0C.md)
 
-## Q1：Dataset 和 DataLoader 分别解决什么问题？
+## Q1: What problems do Dataset and DataLoader solve respectively?
 
-`Dataset` 定义单样本字段，`DataLoader` 负责采样、组批与迭代。样本级逻辑和 batch 级逻辑分开后，`attention_mask`、`labels`、`position_ids` 等字段才能在明确的位置生成和校验。
+`Dataset` defines the fields of a single sample, and `DataLoader` handles sampling, batching, and iteration. Once sample-level and batch-level logic are separated, fields such as `attention_mask`, `labels`, and `position_ids` can be generated and validated at well-defined positions.
 
 
 ```python
@@ -45,7 +45,7 @@ class ToyDataset(Dataset):
 
     def __getitem__(self, idx):
         idx = self.sample_ids[idx]
-        # 样本编号决定输入和标签，训练与验证使用不同编号。
+        # The sample id determines the input and label; training and validation use different ids.
         return {
             'input_ids': torch.tensor([idx], dtype=torch.long),
             'attention_mask': torch.tensor([1], dtype=torch.long),
@@ -60,9 +60,9 @@ for batch in loader:
 
 ```
 
-## Q1 验证：batch 输出 shape 是否稳定？
+## Q1 verification: Is the batch output shape stable?
 
-这里直接确认 `DataLoader` 取出来的 batch 维度是否符合预期。你要记住的是，batch 不一定总是 tuple，dict batch 在大模型训练里更常见。
+Here it directly confirms whether the dimensions of the batch taken from `DataLoader` match expectations. What you should remember is that a batch is not always a tuple; a dict batch is more common in large-model training.
 
 
 ```python
@@ -77,15 +77,15 @@ print('✅ Dataset / DataLoader 通过')
 
 ```
 
-## Q2：`collate_fn` 怎样把单样本组织成 batch？
+## Q2: How does `collate_fn` organize single samples into a batch?
 
-`Dataset` 返回单样本，`collate_fn` 决定同一批样本如何按字段堆叠。输出必须明确字段名、batch 维和 dtype，训练循环才能稳定解包。
+`Dataset` returns a single sample, and `collate_fn` determines how samples in the same batch are stacked by field. The output must specify the field names, batch dimension, and dtype so that the training loop can unpack it stably.
 
 
 ```python
 def collate_pair(batch):
-    # 自定义 collate 时，先把单样本拆开，再按当前任务需求重组。
-    # torch.stack 新增 batch 维，同时保留每条样本原有的序列维。
+    # With a custom collate, first unpack the single samples, then reassemble them according to the current task.
+    # torch.stack adds a batch dimension while preserving the original sequence dimension of each sample.
     input_ids = torch.stack([item['input_ids'] for item in batch], dim=0)
     attention_mask = torch.stack([item['attention_mask'] for item in batch], dim=0)
     labels = torch.stack([item['labels'] for item in batch], dim=0)
@@ -103,9 +103,9 @@ for batch in loader:
 
 ```
 
-## Q2 验证：自定义 collate 是否保留了 batch 与序列维？
+## Q2 verification: Does the custom collate preserve the batch and sequence dimensions?
 
-自定义 `collate_fn` 仍应得到 `[batch, sequence]`，不能在组批时把单样本的序列维压平。
+A custom `collate_fn` should still produce `[batch, sequence]` and must not flatten the sequence dimension of single samples during batching.
 
 
 ```python
@@ -118,9 +118,10 @@ print('✅ collate_fn 通过')
 
 ```
 
-## Q3：变长 tokenizer 输出怎样成为统一 batch？
+## Q3: How do variable-length tokenizer outputs become a uniform batch?
 
-tokenizer 把文本变成不同长度的 token 序列；batch 层再完成截断、补齐和字段派生。三类字段承担不同职责：`input_ids` 保存 token 编号，`attention_mask` 区分有效 token 与 padding，`labels` 指定哪些位置参与损失。下面从 tokenizer 输出开始，验证长度对齐、padding mask 和 labels 屏蔽是否满足训练接口契约。
+The tokenizer turns text into token sequences of different lengths; the batch layer then performs truncation, padding, and field derivation. The three kinds of fields have different responsibilities: `input_ids` stores the token ids, `attention_mask` distinguishes valid tokens from padding, and `labels` specifies which positions participate in the loss. Below, starting from the tokenizer output, you verify whether length alignment, the padding mask, and label masking satisfy the training interface contract.
+
 
 ```python
 PAD_ID = 0
@@ -129,14 +130,14 @@ EOS_ID = 2
 
 
 def tokenize_for_contract(text, max_length):
-    """生成确定性的 token 序列，用于演示截断契约而非复现真实分词算法。"""
+    """Generate a deterministic token sequence to demonstrate the truncation contract rather than reproduce a real tokenization algorithm."""
     content_ids = [10 + (ord(char) % 50) for char in text]
     token_ids = [BOS_ID, *content_ids, EOS_ID]
     return token_ids[:max_length]
 
 
 def collate_tokenized_texts(texts, max_length):
-    """将变长 tokenizer 输出整理为 input_ids、attention_mask 与 labels。"""
+    """Arrange variable-length tokenizer outputs into input_ids, attention_mask, and labels."""
     tokenized = [tokenize_for_contract(text, max_length) for text in texts]
     batch_length = max(len(token_ids) for token_ids in tokenized)
 
@@ -160,9 +161,9 @@ tokenized_batch = collate_tokenized_texts(['batch', 'io'], max_length=6)
 print({key: value.tolist() for key, value in tokenized_batch.items()})
 ```
 
-## Q3 验证：截断、padding 与忽略标签是否使用同一坐标？
+## Q3 verification: Do truncation, padding, and ignored labels use the same coordinates?
 
-三个字段应具有相同 shape；padding 位置的 `attention_mask` 为 0，对应 `labels` 必须为 `-100`。
+The three fields should have the same shape; the `attention_mask` at padding positions is 0, and the corresponding `labels` must be `-100`.
 
 
 ```python
@@ -174,20 +175,20 @@ print('✅ tokenizer 输出与 padding 契约通过')
 
 ```
 
-## Q4：有效输入位置与监督位置为什么需要分别表示？
+## Q4: Why do valid input positions and supervised positions need to be represented separately?
 
-`attention_mask` 说明哪些位置属于有效输入，`labels != -100` 说明哪些位置参与损失。一个有效输入位置可以提供上下文但不直接贡献监督，因此两种 mask 不能互相替代。
+`attention_mask` indicates which positions are valid inputs, and `labels != -100` indicates which positions participate in the loss. A valid input position can provide context without directly contributing supervision, so the two kinds of masks cannot replace each other.
 
-| 字段或条件 | 控制对象 | 典型取值 |
+| Field or condition | What it controls | Typical values |
 |:---|:---|:---|
-| `attention_mask` | 位置是否属于有效输入 | 有效位置为 1，padding 为 0 |
-| `labels` | 每个位置的目标值 | 目标编号或 `-100` |
-| `labels != -100` | 位置是否贡献监督损失 | 由任务的数据契约决定 |
+| `attention_mask` | Whether a position is a valid input | 1 for valid positions, 0 for padding |
+| `labels` | The target value at each position | target id or `-100` |
+| `labels != -100` | Whether a position contributes to the supervised loss | Determined by the task's data contract |
 
 
 ```python
 def pad_to_max_len(tensors, pad_value):
-    # 先按最长样本补齐，再把 batch 维堆起来。
+    # First pad to the longest sample, then stack along the batch dimension.
     max_len = max(t.size(0) for t in tensors)
     padded = []
     for tensor in tensors:
@@ -201,7 +202,7 @@ def pad_to_max_len(tensors, pad_value):
 
 
 def build_sequence_sample(token_ids, supervised_positions):
-    """用布尔位置表构造通用序列输入与监督标签。"""
+    """Build a generic sequence input and supervision labels from a boolean position table."""
     if len(token_ids) != len(supervised_positions):
         raise ValueError('token_ids and supervised_positions must have the same length')
     input_ids = torch.tensor(token_ids, dtype=torch.long)
@@ -221,7 +222,7 @@ sequence_samples = [
     build_sequence_sample([21, 22, 23], [True, False, True]),
 ]
 
-# padding 只是把变长样本对齐到同一 batch 形状。
+# Padding only aligns variable-length samples to the same batch shape.
 sequence_batch = {
     'input_ids': pad_to_max_len([item['input_ids'] for item in sequence_samples], pad_value=0),
     'attention_mask': pad_to_max_len([item['attention_mask'] for item in sequence_samples], pad_value=0),
@@ -235,9 +236,9 @@ print('labels row1:', sequence_batch['labels'][1].tolist())
 
 ```
 
-## Q4 验证：有效位置、监督位置与 padding 是否使用同一坐标？
+## Q4 verification: Do valid positions, supervised positions, and padding use the same coordinates?
 
-三个字段必须具有相同 shape；未监督但有效的位置保留 `attention_mask=1` 和 `labels=-100`，padding 则同时使用 `attention_mask=0` 与 `labels=-100`。
+The three fields must have the same shape; unsupervised but valid positions keep `attention_mask=1` and `labels=-100`, while padding uses both `attention_mask=0` and `labels=-100`.
 
 
 ```python
@@ -254,9 +255,9 @@ print('✅ 输入位置、监督位置与 padding 对齐通过')
 
 ```
 
-## Q5：batch 怎样适配并验证为模型可消费的输入？
+## Q5: How is a batch adapted and validated into input that the model can consume?
 
-数据 batch 可以同时包含模型输入与监督标签。适配层负责迁移 device、筛出 `forward()` 所需字段，并把 `labels` 单独交给损失函数；契约检查则在执行前验证字段、首维、shape 和 dtype。
+A data batch can contain both model inputs and supervision labels. The adaptation layer handles moving to the device, filters out the fields needed by `forward()`, and passes `labels` separately to the loss function; the contract check validates the fields, first dimension, shape, and dtype before execution.
 
 
 ```python
@@ -268,7 +269,7 @@ class MaskedMeanRegressor(nn.Module):
 
 
 def adapt_batch_for_model(batch, device):
-    """迁移 batch，并拆分模型输入与监督标签。"""
+    """Move the batch and split it into model inputs and supervision labels."""
     moved = {key: value.to(device) for key, value in batch.items()}
     model_inputs = {
         'input_ids': moved['input_ids'],
@@ -278,7 +279,7 @@ def adapt_batch_for_model(batch, device):
 
 
 def validate_batch_contract(batch, required_keys, expected_batch_size):
-    """检查训练 batch 的字段、首维、shape 对齐和整数 dtype。"""
+    """Check the fields, first dimension, shape alignment, and integer dtype of a training batch."""
     missing_keys = [key for key in required_keys if key not in batch]
     if missing_keys:
         return {'valid': False, 'errors': [f'missing keys: {missing_keys}']}
@@ -303,9 +304,9 @@ print('predictions / labels shape：', predictions.shape, labels.shape)
 
 ```
 
-## Q5 验证：适配结果与失败报告是否都足够明确？
+## Q5 verification: Are both the adapted result and the failure report sufficiently explicit?
 
-适配结果应只把模型需要的字段传入 `forward()`，同时保留 labels 供损失计算；合法 batch 应通过检查，缺少字段时应在模型前向之前给出明确报告。
+The adapted result should pass only the fields the model needs into `forward()`, while keeping labels for loss computation; a valid batch should pass the check, and a missing field should produce an explicit report before the model forward pass.
 
 
 ```python
@@ -323,9 +324,9 @@ print('✅ batch 适配与输入契约检查通过')
 
 ```
 
-## Q6：怎样把数据、更新和验证接成完整训练生命周期？
+## Q6: How do you connect data, updates, and validation into a complete training lifecycle?
 
-同一份 batch 契约应同时服务训练和验证。训练阶段启用梯度并执行 optimizer step，验证阶段切换 `eval()` 并关闭梯度记录；两者返回可比较的平均损失。
+The same batch contract should serve both training and validation. The training stage enables gradients and performs an optimizer step, and the validation stage switches to `eval()` and disables gradient recording; both return a comparable average loss.
 
 
 ```python
@@ -342,7 +343,7 @@ class TrainableRegressor(nn.Module):
 
 
 def run_epoch(model, loader, optimizer=None):
-    """使用同一 batch 契约执行训练或验证 epoch。"""
+    """Run a training or validation epoch using the same batch contract."""
     is_training = optimizer is not None
     model.train(is_training)
     loss_sum = 0.0
@@ -382,9 +383,9 @@ print({'train_loss': train_loss, 'validation_loss': validation_loss})
 
 ```
 
-## Q6 验证：训练更新和验证边界是否正确？
+## Q6 verification: Are the training updates and the validation boundary correct?
 
-训练 epoch 应更新至少一个参数；验证 epoch 应返回有限损失、保持参数不变，并在结束时让模型处于验证态。
+The training epoch should update at least one parameter; the validation epoch should return a finite loss, keep the parameters unchanged, and leave the model in evaluation mode at the end.
 
 
 ```python
@@ -401,20 +402,20 @@ print('✅ 数据、更新与验证生命周期通过')
 
 ```
 
-## Q7：训练后怎样用 loss 和任务指标评价模型？
+## Q7: After training, how do you evaluate the model with loss and task metrics?
 
-loss 是优化目标，任务指标回答模型在目标任务上表现如何。评价时应使用独立的 validation 或 test 数据、关闭梯度并按样本或 token 汇总分子与分母，避免直接平均不同大小 batch 的均值。validation 指标用于调参和选择最佳 checkpoint，test 指标用于最终报告，不应反过来参与模型选择。下面沿用回归示例计算 MAE、MSE 与 RMSE。
+The loss is the optimization objective, and task metrics answer how well the model performs on the target task. Evaluation should use independent validation or test data, disable gradients, and aggregate numerators and denominators by sample or token, rather than directly averaging the means of batches of different sizes. Validation metrics are used for tuning and selecting the best checkpoint, and test metrics are used for the final report; the reverse must not happen. The regression example below computes MAE, MSE, and RMSE.
 
-| 任务 | 常用评价信号 | 聚合单位 |
+| Task | Common evaluation signals | Aggregation unit |
 |:---|:---|:---|
-| 回归 | MAE、RMSE | 样本 |
-| 分类 | loss、accuracy，必要时 precision / recall / F1 | 样本或类别 |
-| 语言模型 | token loss、perplexity | 非 padding token |
+| Regression | MAE, RMSE | Sample |
+| Classification | loss, accuracy, and precision / recall / F1 when needed | Sample or class |
+| Language model | token loss, perplexity | Non-padding tokens |
 
 
 ```python
 def evaluate_regressor(model, loader):
-    """按样本汇总回归误差，返回可比较的评价指标。"""
+    """Aggregate regression errors by sample and return comparable evaluation metrics."""
     model.eval()
     absolute_error_sum = 0.0
     squared_error_sum = 0.0
@@ -458,14 +459,14 @@ print('evaluation metrics：', evaluation_metrics)
 
 ```
 
-## Q7 验证：指标是否按全部样本汇总且不修改模型？
+## Q7 verification: Are the metrics aggregated over all samples without modifying the model?
 
-评价 loader 的两个 batch 大小分别为 3 和 1；指标仍应按 4 个样本汇总。评价过程不更新参数，并保持模型处于验证态。
+The two batches of the evaluation loader have sizes 3 and 1; the metrics should still be aggregated over 4 samples. The evaluation process does not update parameters and keeps the model in evaluation mode.
 
 
 ```python
 assert evaluation_metrics['sample_count'] == len(validation_dataset)
-# 一个 batch 三条样本，另一个一条；直接按全部预测重算，核对聚合分母。
+# One batch has three samples and the other has one; recompute directly over all predictions to check the aggregation denominator.
 all_validation = collate_pair([validation_dataset[i] for i in range(len(validation_dataset))])
 all_inputs, all_labels = adapt_batch_for_model(all_validation, torch.device('cpu'))
 with torch.no_grad():
@@ -483,10 +484,10 @@ print('✅ 模型评价指标与参数不变性通过')
 
 ```
 
-## 相关阅读
+## Related Reading
 
-完成通用数据到训练的闭环后，可以继续观察模型内部的 Block 数据流；需要构造提示—回答监督标签时，再进入 SFT 训练循环。
+Now that the general loop from data to training is complete, you can continue by observing the Block dataflow inside the model; when you need to construct prompt-response supervision labels, go on to the SFT training loop.
 
-- [13. Transformer Block Dataflow and Residual Stream | Transformer Block 数据流与残差通路](./13_Transformer_Block_Dataflow_and_Residual_Stream.md)
-- [13. SFT Training Loop | SFT 训练循环](../02_PyTorch_Algorithms/13_SFT_Training_Loop.md)
-- [73. Training Performance Analysis | 训练性能分析](../02_PyTorch_Algorithms/73_Training_Performance_Analysis.md)
+- [13. Transformer Block Dataflow and Residual Stream](./13_Transformer_Block_Dataflow_and_Residual_Stream.md)
+- [13. SFT Training Loop](../02_PyTorch_Algorithms/13_SFT_Training_Loop.md)
+- [73. Training Performance Analysis](../02_PyTorch_Algorithms/73_Training_Performance_Analysis.md)
