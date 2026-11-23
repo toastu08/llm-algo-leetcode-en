@@ -1,6 +1,6 @@
 # 25. Sparse Computation and Sparse Attention | 稀疏计算与稀疏注意力
 
-**难度：** Hard | **环境：** CPU-first | **标签：** `模型结构`, `Sparse`, `Sparse Attention` | **目标人群：** 需要判断稀疏结构能否转化为实际收益的学习者
+**Difficulty:** Hard | **Environment:** CPU-first | **Tags:** `model structure`, `Sparse`, `Sparse Attention` | **Audience:** learners who need to judge whether a sparse structure can be converted into a real gain
 
 > 🚀 **云端运行环境**
 >
@@ -12,40 +12,40 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-稀疏只有同时改变数据结构和执行路径，才可能转化为容量、计算或访存收益。权重、激活值和注意力连接的稀疏模式具有不同的可跳过对象与执行约束。
-本节建立“稀疏对象 → 结构粒度 → 保留连接 → 执行收益”的关系。完成后，你应能计算稀疏率与理论工作量，并判断随机、行列或块稀疏是否具备硬件执行条件。
+Sparsity can be converted into capacity, compute, or memory-access gains only when it changes the data structure and the execution path at the same time. The sparsity patterns of weights, activations, and attention connections have different skippable objects and execution constraints.
+This section establishes the relationship "sparse object → structural granularity → retained connections → execution gain". After completing it, you should be able to compute the sparsity rate and theoretical workload, and judge whether random, row-column, or block sparsity has the hardware execution conditions.
 
-**关键词：** 稀疏率、结构粒度、密度
+**Keywords:** sparsity rate, structural granularity, density
 
-![本节概念关系](../public/01_Hardware_Math_and_Systems/25_sparse_execution_map.svg)
-
-
-
-## 前置阅读
-
-**导语：** 先理解 Attention 的显存对象和 Tensor Core 的规则计算，再判断稀疏模式能否映射到执行路径。
-
-- [04. Attention Variants and Memory Optimization | 注意力变体与显存优化](./04_Attention_Memory_Optimization.md)
-- [23. TensorCore Deep Dive | Tensor Core 深度剖析](./23_TensorCore_Deep_Dive.md)
-
-## Q1：稀疏的对象、模式和密度分别是什么？
+![Concept relationships in this section](../public/01_Hardware_Math_and_Systems/25_sparse_execution_map.svg)
 
 
-稀疏的第一个任务是把对象、模式和密度说清楚：稀疏对象可以是权重、激活或 Attention 连接；稀疏模式描述保留元素如何分布；密度表示仍然保留的元素比例。
 
-如果只是把矩阵里很多位置置零，但 kernel 仍然按 dense 的方式扫描、广播和累加，零值就只是换了个存法，计算和搬运未必真的少。
+## Prerequisite Reading
 
-密度下降本身不等于计算和搬运已经减少；后面的结构判断会继续检查这些元素能否被执行路径跳过。
+**Overview:** First understand the memory objects of Attention and the regular computation of the Tensor Core, then judge whether a sparsity pattern can be mapped to an execution path.
 
-### Q1小验证：稀疏带来的不是自动加速
+- [04. Attention Variants and Memory Optimization](./04_Attention_Memory_Optimization.md)
+- [23. TensorCore Deep Dive](./23_TensorCore_Deep_Dive.md)
 
-先判断稀疏是否能被执行路径真正利用。
+## Q1: What are the sparse object, pattern, and density respectively?
+
+
+The first task of sparsity is to state the object, pattern, and density clearly: the sparse object can be weights, activations, or Attention connections; the sparsity pattern describes how the retained elements are distributed; density represents the proportion of elements still retained.
+
+If you only set many positions in the matrix to zero while the kernel still scans, broadcasts, and accumulates in a dense way, the zeros only change how the data is stored, and the computation and transfer may not really decrease.
+
+A drop in density does not by itself mean the computation and transfer have already decreased; the structural judgment later will continue to check whether these elements can be skipped by the execution path.
+
+### Q1 Mini Check: Sparsity does not bring automatic speedup
+
+First judge whether the sparsity can actually be used by the execution path.
 
 ```python
 def sparsity_definition_report(target='weights', density=0.5, structure='block'):
-    """整理稀疏对象、模式和密度，不判断执行候选路径。"""
+    """Organize the sparse object, pattern, and density without judging the execution candidate path."""
     if target not in {'weights', 'activation', 'attention'}:
         raise ValueError(f'未知稀疏对象: {target}')
     if not 0 <= density <= 1:
@@ -72,29 +72,29 @@ else:
 
 ```
 
-## Q2：为什么结构化稀疏比非结构化稀疏更容易落地？
+## Q2: Why is structured sparsity easier to deploy than unstructured sparsity?
 
 
-结构化稀疏会把稀疏模式固定成硬件更容易识别和优化的形状，因此更容易映射到 tile、warp 或 sparse MMA。
+Structured sparsity fixes the sparsity pattern into a shape that hardware can recognize and optimize more easily, so it is easier to map to tiles, warps, or sparse MMA.
 
-非结构化稀疏虽然灵活，但通常需要额外索引、分支和不规则访存；如果 kernel 没有对应支持，数据变稀疏并不会自动减少执行工作。
+Although unstructured sparsity is flexible, it usually requires extra indices, branches, and irregular memory access; if the kernel has no corresponding support, making the data sparse does not automatically reduce the executed work.
 
-可以用下面的对照表把模式、执行路径和代价放在同一口径下。
+The comparison table below puts the pattern, execution path, and cost on the same footing.
 
-| 稀疏模式 | 结构特点 | 执行路径 | 主要代价 |
+| Sparsity pattern | Structural characteristics | Execution path | Main cost |
 | --- | --- | --- | --- |
-| 非结构化稀疏 | 零值位置随机 | 需要索引和不规则访存 | 分支、索引、访存碎片 |
-| 行 / 列结构化稀疏 | 按行或列裁剪 | 较容易映射规则访问 | 结构约束较强 |
-| Block 稀疏 | 按块保留或裁剪 | 容易映射 tile / warp | 粒度可能影响质量 |
-| 硬件约束结构 | 满足特定 sparse MMA 形状 | 可使用专用路径 | 依赖硬件与 backend |
+| Unstructured sparsity | Zero positions are random | Requires indices and irregular memory access | Branches, indices, memory-access fragmentation |
+| Row / column structured sparsity | Pruned by row or column | Easier to map to regular access | Stronger structural constraints |
+| Block sparsity | Retain or prune by block | Easy to map to tiles / warps | Granularity may affect quality |
+| Hardware-constrained structure | Meets a specific sparse MMA shape | Can use a dedicated path | Depends on hardware and backend |
 
-### Q2小验证：为什么规则形状更容易优化
+### Q2 Mini Check: Why regular shapes are easier to optimize
 
-规则越强，越容易映射到规则的 tile、warp 或 sparse MMA 计算路径；本节先用 CPU 代码检查这种结构关系。
+The stronger the regularity, the easier it is to map to regular tile, warp, or sparse MMA computation paths; this section first uses CPU code to check this structural relationship.
 
 ```python
 def structured_path_report(shape='block', hardware='mma'):
-    """报告稀疏结构与硬件路径的匹配关系，不生成固定性能分数。"""
+    """Report how the sparse structure matches the hardware path without producing a fixed performance score."""
     if shape not in {'block', 'row', 'column', 'random'}:
         raise ValueError(f'未知稀疏形状: {shape}')
     if hardware not in {'mma', 'tensorcore', 'cpu'}:
@@ -115,28 +115,28 @@ assert not structured_path_report('random', 'mma')['execution_candidate']
 
 ```
 
-## Q3：权重、Attention 和 MLP 稀疏的收益有什么不同？
+## Q3: How do the gains of weight, Attention, and MLP sparsity differ?
 
 
-三类稀疏首先改变的对象不同：
+The three kinds of sparsity first change different objects:
 
-| 稀疏对象 | 主要改变 | 可能节省的成本 | 额外风险 |
+| Sparse object | Main change | Cost that may be saved | Additional risk |
 | --- | --- | --- | --- |
-| 权重稀疏 | 参数矩阵和权重加载 | 权重存储、矩阵乘法工作量 | 稀疏权重需要匹配的矩阵 kernel |
-| Attention 稀疏 | token-token 连接或 score 计算 | 长序列计算量、部分中间结果 | 动态索引和不规则访存 |
-| MLP 稀疏 | FFN 的激活或通道 | 激活路径、矩阵乘法工作量 | 路由和负载不均衡 |
+| Weight sparsity | Parameter matrix and weight loading | Weight storage, matrix multiplication workload | Sparse weights need a matching matrix kernel |
+| Attention sparsity | token-token connections or score computation | Long-sequence compute volume, some intermediate results | Dynamic indexing and irregular memory access |
+| MLP sparsity | FFN activations or channels | Activation path, matrix multiplication workload | Routing and load imbalance |
 
-下面的代码继续把对象、density、结构和理论执行条件整理成报告；它不生成真实加速比。
+The code below continues to organize the object, density, structure, and theoretical execution conditions into a report; it does not produce a real speedup ratio.
 
-### Q3小验证：稀疏能不能落到执行上
+### Q3 Mini Check: Whether sparsity can land on execution
 
-先区分稀疏对象改变了哪类成本，再检查结构是否具备落到执行路径的条件。
+First distinguish which kind of cost the sparse object changes, then check whether the structure meets the conditions to land on an execution path.
 
 ```python
 def sparsity_execution_ledger(target='attention', density=0.3, structure='block'):
-    """整理稀疏对象、主要成本和执行候选条件。
+    """Organize the sparse object, main cost, and execution candidate conditions.
 
-    返回值是机制判断表，不是 speedup 预测；本节只验证对象、结构和理论成本。
+    The return value is a mechanism judgment table, not a speedup prediction; this section only verifies the object, structure, and theoretical cost.
     """
     profiles = {
         'weights': {
@@ -180,30 +180,31 @@ except ValueError:
     print('✅ 稀疏对象校验通过')
 else:
     raise AssertionError('未知稀疏对象应报错')
+
 ```
 
-## Q4：为什么理论稀疏度可能没有转化成较低计算量？
+## Q4: Why may the theoretical sparsity rate not be converted into a lower compute volume?
 
 
-Q4 要把“理论上更稀”转成可检查的对照：固定输入、density、稀疏模式和计算规则，分别记录 dense / sparse 的保留连接数、理论计算量和输出差异。
+Q4 must turn "theoretically sparser" into a checkable comparison: fix the input, density, sparsity pattern, and computation rule, and record the retained connection count, theoretical compute volume, and output difference of dense / sparse respectively.
 
-如果稀疏只改变了存储格式，却没有减少实际计算，理论计算量也不会自动转化为运行收益。下面的代码先整理 CPU 可验证的风险提示和对照指标。
+If sparsity only changes the storage format without reducing the actual computation, the theoretical compute volume will not automatically turn into a runtime gain. The code below first organizes the risk notes and comparison metrics that can be verified on the CPU.
 
-可以按下面的对照表组织机制实验，先固定输入口径，再只改变稀疏 mask。
+The mechanism experiment can be organized according to the comparison table below: first fix the input conditions, then change only the sparse mask.
 
-| 对照项 | 保持不变 | 只改变的条件 | 需要记录 |
+| Comparison item | Kept unchanged | Only changed condition | To record |
 | --- | --- | --- | --- |
-| dense baseline | 输入、dtype、shape、softmax 规则 | 全连接 mask | 输出、理论计算量 |
-| sparse candidate | 输入、dtype、shape、softmax 规则 | sparse mask / density | 输出、保留连接数 |
-| quality check | 评测输入和误差口径 | 是否使用稀疏 mask | 输出差异、数值稳定性 |
+| dense baseline | Input, dtype, shape, softmax rule | Fully connected mask | Output, theoretical compute volume |
+| sparse candidate | Input, dtype, shape, softmax rule | sparse mask / density | Output, retained connection count |
+| quality check | Evaluation input and error convention | Whether the sparse mask is used | Output difference, numerical stability |
 
-### Q4小验证：如何设计 dense / sparse 对照
+### Q4 Mini Check: How to design a dense / sparse comparison
 
-先列出固定输入、dense baseline、sparse mask 和需要记录的 CPU 指标。
+First list the fixed input, dense baseline, sparse mask, and the CPU metrics to record.
 
 ```python
 def sparse_failure_reason(density, structure='block'):
-    """列出稀疏机制对照的风险提示，不输出硬件性能结论。"""
+    """List the risk notes of the sparse-mechanism comparison without outputting hardware performance conclusions."""
     if not 0 <= density <= 1:
         raise ValueError('density 必须位于 [0, 1]')
     if structure not in {'block', 'row', 'column', 'random'}:
@@ -230,28 +231,28 @@ assert sparse_failure_reason(0.3, 'block')['usable_for_demo']
 
 ```
 
-## Q5：Sparse Attention 如何减少 token-token 连接？
+## Q5: How does Sparse Attention reduce token-token connections?
 
 
-用一个布尔 mask 保留局部窗口中的连接，就可以在 CPU 上明确观察 dense attention 与 sparse attention 的差别：输入和 softmax 规则保持不变，只改变允许参与计算的连接。这里验证的是 mask、保留连接数、理论计算量和输出差异，不把理论减少量写成运行加速。
+Using a boolean mask to retain connections within a local window makes it possible to clearly observe the difference between dense attention and sparse attention on the CPU: the input and softmax rule remain unchanged, and only the connections allowed to participate in the computation change. What is verified here is the mask, retained connection count, theoretical compute volume, and output difference; the theoretical reduction is not written as a runtime speedup.
 
-### Q5小验证：先验证连接，再观察输出
+### Q5 Mini Check: Verify the connections first, then observe the output
 
-下面的实现使用局部窗口构造 sparse mask，并与 dense mask 对照。
+The implementation below constructs a sparse mask using a local window and compares it with the dense mask.
 
 ```python
 import math
 import torch
 
 def build_local_attention_mask(seq_len, window):
-    """构造包含自身位置的局部窗口 mask，返回 [1, 1, L, L]。"""
+    """Construct a local-window mask including the position itself, returning [1, 1, L, L]."""
     if seq_len <= 0 or window < 0:
         raise ValueError('seq_len 必须为正，window 不能为负')
     positions = torch.arange(seq_len)
     return (positions[:, None] - positions[None, :]).abs().le(window)[None, None]
 
 def masked_attention_cpu(q, k, v, mask):
-    """在 CPU 上按 mask 计算 scaled dot-product attention。"""
+    """Compute scaled dot-product attention on the CPU according to the mask."""
     scores = q @ k.transpose(-2, -1) / math.sqrt(q.shape[-1])
     scores = scores.masked_fill(~mask, torch.finfo(scores.dtype).min)
     weights = torch.softmax(scores, dim=-1)
@@ -281,11 +282,11 @@ assert 0 < retained < dense_connections
 
 ```
 
-## 相关阅读
+## Related Reading
 
-**导语：** 继续进入稀疏 Attention 机制、规则块执行和成熟组件实现。
+**Overview:** Continue into the sparse Attention mechanism, regular block execution, and mature component implementations.
 
 - [Part 02 · 44 Local, Sliding and Sparse Attention](../02_PyTorch_Algorithms/44_Local_Sliding_and_Sparse_Attention.md)
-- [18. Triton Block Model | Triton Block 模型](./18_Triton_Block_Model.md)
-- [xFormers | Meta 开源高效 Transformer 组件](https://github.com/facebookresearch/xformers)
+- [18. Triton Block Model](./18_Triton_Block_Model.md)
+- [xFormers | Meta's open-source efficient Transformer components](https://github.com/facebookresearch/xformers)
 ---

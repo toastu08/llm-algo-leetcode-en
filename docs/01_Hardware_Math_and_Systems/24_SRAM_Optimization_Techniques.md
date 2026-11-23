@@ -1,6 +1,6 @@
 # 24. SRAM Optimization Techniques | SRAM 优化技术
 
-**难度：** Hard | **环境：** CPU-first | **标签：** `硬件系统`, `SRAM`, `访存优化` | **目标人群：** 需要理解 GPU 片上访存代价的学习者
+**Difficulty:** Hard | **Environment:** CPU-first | **Tags:** `hardware systems`, `SRAM`, `memory-access optimization` | **Audience:** learners who need to understand the cost of on-chip GPU memory access
 
 > 🚀 **云端运行环境**
 >
@@ -12,39 +12,38 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-片上共享内存可以让一次数据搬入被多个线程或多个计算步骤复用，但也会引入容量、同步、访问冲突和寄存器占用约束。复用次数增加并不自动等于端到端加速。
-本节建立“矩阵分块 → 共享内存复用 → 同步与冲突 → 资源准入”的关系。完成后，你应能估算减少的显存流量，并判断一种分块设计是否满足片上资源限制。
+On-chip shared memory lets one data transfer be reused by multiple threads or multiple computation steps, but it also introduces constraints on capacity, synchronization, access conflicts, and register usage. More reuse does not automatically equal an end-to-end speedup.
+This section establishes the relationship "matrix tiling → shared-memory reuse → synchronization and conflicts → resource admission". After completing it, you should be able to estimate the reduced memory traffic and judge whether a tiling design satisfies the on-chip resource limits.
 
-**关键词：** 共享内存、矩阵分块、存储体冲突
+**Keywords:** shared memory, matrix tiling, bank conflicts
 
-![本节概念关系](../public/01_Hardware_Math_and_Systems/24_sram_optimization_chain.svg)
+![Concept relationships in this section](../public/01_Hardware_Math_and_Systems/24_sram_optimization_chain.svg)
 
 
 
-## 前置阅读
+## Prerequisite Reading
 
-**导语：** 先理解 shared memory 如何通过数据复用减少重复搬运，再观察访问布局、同步和寄存器占用如何影响 tile 的实际收益。
+**Overview:** First understand how shared memory reduces repeated transfers through data reuse, then observe how the access layout, synchronization, and register usage affect the actual benefit of a tile.
 
-- [15. CUDA Execution Model | CUDA 执行模型](./15_CUDA_Execution_Model.md)
-- [16. Warp Block SharedMemory Basics | Warp、Block 与 Shared Memory 基础](./16_Warp_Block_SharedMemory_Basics.md)
-- [23. TensorCore Deep Dive | Tensor Core 深度剖析](./23_TensorCore_Deep_Dive.md)
+- [15. CUDA Execution Model](./15_CUDA_Execution_Model.md)
+- [16. Warp Block SharedMemory Basics](./16_Warp_Block_SharedMemory_Basics.md)
+- [23. TensorCore Deep Dive](./23_TensorCore_Deep_Dive.md)
 
-## Q1：共享内存复用能减少多少全局读取？
+## Q1: How many global reads can shared-memory reuse eliminate?
 
-同一数据块被使用多次时，可以每次从全局内存读取，也可以先搬入共享内存，再由线程复用。先假设每次全局读取都需要搬运整个数据块，暂不计缓存命中：数据块大小乘以使用次数，就是未复用方案的读取字节数；共享内存方案只搬入一次，同时增加片上写入、读取和同步。
+When the same data block is used multiple times, it can either be read from global memory each time, or be moved into shared memory first and then reused by threads. First assume that each global read must transfer the whole data block, and ignore cache hits for now: the data block size multiplied by the number of uses is the number of read bytes in the non-reused scheme; the shared-memory scheme transfers it once and adds on-chip writes, reads, and synchronization.
 
-下面分开记录各类字节数和同步次数。全局读取减少量是这个访问模型的结果，实际 HBM 流量还受缓存影响；字节数与同步次数不能直接相减得到耗时。
+The byte counts and synchronization counts of each kind are recorded separately below. The reduction in global reads is a result of this access model, and actual HBM traffic is also affected by the cache; byte counts and synchronization counts cannot be subtracted directly to obtain elapsed time.
 
-### Q1小验证：固定数据块，只改变使用次数
+### Q1 Mini Check: Fix the data block, change only the number of uses
 
-先预测使用一次和使用多次的全局读取量，再检查共享内存写入、读取与同步的增量。
-
+First predict the global read volume for one use and multiple uses, then check the increment in shared-memory writes, reads, and synchronization.
 
 ```python
 def reuse_traffic_ledger(tile_bytes, uses, sync_points=1):
-    """计算整块重复读取模型的字节数，不包含缓存和耗时估计。"""
+    """Compute the byte counts of the whole-block repeated-read model, excluding cache and elapsed-time estimates."""
     for name, value in {'tile_bytes': tile_bytes, 'uses': uses}.items():
         if type(value) is not int or value <= 0:
             raise ValueError(f'{name} 必须是正整数')
@@ -60,7 +59,7 @@ def reuse_traffic_ledger(tile_bytes, uses, sync_points=1):
     }
 
 
-TILE_BYTES = 4096  # 可修改：每次完整使用的数据块大小，单位字节。
+TILE_BYTES = 4096  # Editable: the size of the data block fully used each time, in bytes.
 for uses in [1, 2, 4]:
     print(uses, '次使用 ->', reuse_traffic_ledger(TILE_BYTES, uses))
 assert reuse_traffic_ledger(4096, 1)['global_read_bytes_saved'] == 0
@@ -75,22 +74,22 @@ else:
 
 ```
 
-## Q2：bank conflict 为什么会把本来并行的访问串行化？
+## Q2: Why do bank conflicts serialize accesses that were originally parallel?
 
 
-bank conflict 发生在多个线程同时访问不同地址、却落到同一个 bank 时，硬件需要分轮次服务这些请求，因此原本并行的访问可能退化为串行。判断冲突不能只看 bank 数量，还要观察 stride、padding 和对齐方式；同一地址的 broadcast 读取则不能简单按普通冲突处理。
+A bank conflict occurs when multiple threads access different addresses at the same time but they fall into the same bank; the hardware must serve these requests in multiple rounds, so accesses that were originally parallel may degrade into serial ones. Judging conflicts requires looking not only at the number of banks but also at the stride, padding, and alignment; broadcast reads of the same address cannot simply be treated as ordinary conflicts.
 
-### Q2小验证：访问模式为什么重要
+### Q2 Mini Check: Why the access pattern matters
 
-让一个 warp 的线程按不同 stride、padding 或 broadcast 方式访问 shared memory，观察它们落到哪些 bank，以及最严重的冲突度。
+Let the threads of a warp access shared memory with different strides, padding, or broadcast patterns, and observe which banks they fall into and the most severe conflict degree.
 
 ```python
 def bank_access_report(stride, banks=32, threads=32, element_words=1, padding_words=0, access_mode='strided'):
-    """报告一个 warp 的 bank 映射，不把冲突转换成虚构的耗时。
+    """Report the bank mapping of one warp without converting conflicts into invented elapsed time.
 
-    padding_words 用于模拟改变行步长；broadcast 用于区分同地址读取
-    与不同地址落入同一 bank 的情况。真实冲突还会受到数据类型、
-    广播规则和具体访问指令影响，因此这里只验证映射机制。
+    padding_words simulates changing the row stride; broadcast distinguishes reads of the same address
+    from different addresses falling into the same bank. Real conflicts are also affected by the data type,
+    broadcast rules, and the specific access instruction, so only the mapping mechanism is verified here.
     """
     if stride <= 0 or banks <= 0 or threads <= 0 or element_words <= 0 or padding_words < 0:
         raise ValueError('stride、banks、threads 和 element_words 必须为正数，padding_words 不能为负数')
@@ -127,34 +126,33 @@ else:
 
 ```
 
-## Q3：分块、填充和缓冲如何限制驻留块数？
+## Q3: How do tiling, padding, and buffering limit the number of resident blocks?
 
-矩阵乘法的一个线程块可以同时保存左矩阵的 $M\times K$ 子块和右矩阵的 $K\times N$ 子块。设每元素占 $b$ 字节，右矩阵每行额外填充 $p$ 个元素，缓冲份数为 $q$，共享内存用量为：
+A thread block of a matrix multiplication can hold the $M\times K$ sub-block of the left matrix and the $K\times N$ sub-block of the right matrix at the same time. Let each element occupy $b$ bytes, let each row of the right matrix be additionally padded with $p$ elements, and let the number of buffer copies be $q$; the shared-memory usage is:
 
 $$
 S_{\mathrm{block}}=q\,b\,[MK+K(N+p)].
 $$
 
-这里 $M,N,K$ 是分块维度，$p$ 用于改变右矩阵的行步长，$q=2$ 表示为两组数据预留双缓冲。双缓冲只是容量条件，是否形成计算与搬运重叠还取决于执行调度。代码用假设的每 SM 预算，分别计算共享内存、线程数和块数限制，取最小值作为驻留块数上限；该上限尚未计入寄存器、分配粒度等限制。
+Here $M,N,K$ are the tile dimensions, $p$ is used to change the row stride of the right matrix, and $q=2$ means reserving double buffering for two groups of data. Double buffering is only a capacity condition; whether computation and transfer actually overlap still depends on the execution schedule. The code uses an assumed per-SM budget to compute the shared-memory, thread-count, and block-count limits separately, and takes the minimum as the upper bound on resident blocks; this upper bound does not yet include limits such as registers and allocation granularity.
 
-| 设计项 | 可计算的变化 | 需要同时检查 |
+| Design item | Computable change | What must be checked at the same time |
 |:---|:---|:---|
-| 分块维度 | 左右子块的元素数与共享内存字节数 | 更大的工作集可能减少驻留块数 |
-| 行填充 | 增加 $Kp$ 个元素的容量 | 存储体映射是否改善，见前一问 |
-| 缓冲份数 | 共享内存用量按份数增长 | 调度是否真正重叠搬运与计算 |
-| 每块线程数 | 线程预算允许的驻留块数 | 多个资源上限取最小值 |
+| Tile dimensions | Element count and shared-memory bytes of the left and right sub-blocks | A larger working set may reduce the number of resident blocks |
+| Row padding | Capacity increased by $Kp$ elements | Whether the bank mapping improves, see the previous question |
+| Buffer copies | Shared-memory usage grows with the number of copies | Whether the schedule actually overlaps transfer and computation |
+| Threads per block | Resident blocks allowed by the thread budget | Take the minimum of multiple resource upper bounds |
 
-### Q3小验证：比较单缓冲、双缓冲与行填充
+### Q3 Mini Check: Compare single buffering, double buffering, and row padding
 
-固定分块维度，分别改变缓冲份数或填充量，检查共享内存字节数和驻留块数上限。
-
+Fix the tile dimensions, change the number of buffer copies or the padding amount respectively, and check the shared-memory bytes and the resident-block upper bound.
 
 ```python
 def tile_resource_ledger(tile_m, tile_n, tile_k, element_bytes=4, buffers=1,
                          padding=0, threads_per_block=256,
                          smem_per_sm_bytes=65536, max_threads_per_sm=2048,
                          max_blocks_per_sm=16):
-    """按给定预算估算驻留上限；预算是教学输入，不代表特定 GPU。"""
+    """Estimate the residency upper bound under the given budgets; the budgets are teaching inputs and do not represent a specific GPU."""
     positive = {
         'tile_m': tile_m, 'tile_n': tile_n, 'tile_k': tile_k,
         'element_bytes': element_bytes, 'buffers': buffers,
@@ -203,22 +201,21 @@ assert tile_resource_ledger(128, 128, 128)['resident_blocks_upper_bound'] == 0
 
 ```
 
-## Q4：寄存器需求增加后，哪些资源限制会先出现？
+## Q4: After register demand increases, which resource limits appear first?
 
-分块与临时值增加时，每线程寄存器需求可能上升。在给定每线程预算下，先记录需求超出量；再把每线程需求乘以每块线程数，估算一个块需要多少寄存器。每 SM 寄存器总量除以每块需求，给出另一项驻留块数上限；它与上一问的共享内存和线程上限共同约束驻留。
+As tiling and temporary values increase, the per-thread register demand may rise. Under a given per-thread budget, first record the amount by which the demand is exceeded; then multiply the per-thread demand by the number of threads per block to estimate how many registers one block needs. Dividing the total registers per SM by the per-block demand gives another upper bound on resident blocks; it constrains residency together with the shared-memory and thread upper bounds from the previous question.
 
-下面假设输入需求就是每线程分配量，暂不计寄存器分配粒度。超出所设预算说明需要检查编译结果，而不等于已经产生同等数量的溢出读写：编译器可能缩短变量生命周期、重算或把值存入本地内存。实际溢出字节数与耗时要查看编译报告及执行指标。
+Below it is assumed that the input demand is the per-thread allocation, without considering register allocation granularity for now. Exceeding the set budget means the compilation result needs to be checked, and does not mean the same number of overflow reads and writes has already occurred: the compiler may shorten variable lifetimes, recompute, or store values in local memory. The actual number of spilled bytes and the elapsed time must be seen in the compilation report and execution metrics.
 
-### Q4小验证：固定线程数，只增加寄存器需求
+### Q4 Mini Check: Fix the thread count, increase only the register demand
 
-观察每块寄存器总量、预算超出量和驻留块数上限，再与上一问的共享内存上限取最小值。
-
+Observe the total registers per block, the budget excess, and the resident-block upper bound, then take the minimum with the shared-memory upper bound from the previous question.
 
 ```python
 def register_resource_ledger(registers_per_thread, threads_per_block=256,
                              per_thread_budget=64, registers_per_sm=65536,
                              max_threads_per_sm=2048, max_blocks_per_sm=16):
-    """按假设分配量计算寄存器约束，不推算实际溢出或加速比。"""
+    """Compute the register constraint from the assumed allocation without inferring actual spills or speedup."""
     values = (registers_per_thread, threads_per_block, per_thread_budget,
               registers_per_sm, max_threads_per_sm, max_blocks_per_sm)
     if any(type(value) is not int or value <= 0 for value in values):
@@ -252,11 +249,11 @@ assert register_resource_ledger(64)['excess_registers_per_thread'] == 0
 
 ```
 
-## 相关阅读
+## Related Reading
 
-**导语：** 把片上复用继续连接到 Triton block 和 FlashAttention，观察 tile 设计怎样减少高带宽内存访问。
+**Overview:** Continue connecting on-chip reuse to the Triton block and FlashAttention, and observe how tile design reduces high-bandwidth memory access.
 
-- [CUDA C Programming Guide：Shared Memory](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#shared-memory)：查阅 shared memory、bank conflict 和同步语义。
-- [18. Triton Block Model | Triton Block 模型](./18_Triton_Block_Model.md)
-- [20. FlashAttention Sim | FlashAttention 模拟](../02_PyTorch_Algorithms/20_FlashAttention_Sim.md)
+- [CUDA C Programming Guide: Shared Memory](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#shared-memory): consult shared memory, bank conflicts, and synchronization semantics.
+- [18. Triton Block Model](./18_Triton_Block_Model.md)
+- [20. FlashAttention Sim](../02_PyTorch_Algorithms/20_FlashAttention_Sim.md)
 ---

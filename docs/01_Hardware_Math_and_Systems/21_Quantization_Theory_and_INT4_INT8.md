@@ -1,6 +1,6 @@
 # 21. Quantization Theory and INT4 INT8 | 量化理论与 INT4/INT8
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `量化压缩`, `INT4/INT8`, `量化理论` | **目标人群：** 系统性能入门者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `quantization and compression`, `INT4/INT8`, `quantization theory` | **Audience:** beginners in system performance
 
 > 🚀 **云端运行环境**
 >
@@ -12,64 +12,64 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-量化通过有限离散值表示权重、激活值或缓存，目标是在质量门槛内降低存储、搬运或计算成本。不同对象和粒度会产生不同的量化误差与元数据代价。
+Quantization represents weights, activations, or caches with a limited set of discrete values, with the goal of reducing storage, transfer, or compute cost within a quality gate. Different objects and granularities produce different quantization errors and metadata costs.
 
-本节建立“表示范围 → 缩放因子（scale）与粒度 → 误差 → 执行条件”的基础关系，为量化与压缩专题中的校准、训练和推理分支提供数值入口。
+This section establishes the basic relationship "representation range → scale factor (scale) and granularity → error → execution conditions", providing a numerical entry point for the calibration, training, and inference branches in the quantization and compression topic.
 
-**关键词：** `INT8`、`INT4`、缩放因子
+**Keywords:** `INT8`, `INT4`, scale factor
 
-![量化对象与介入时机](../public/02_PyTorch_Algorithms/21_quantization_object_timing.svg)
-## 前置阅读
+![Quantization objects and intervention timing](../public/02_PyTorch_Algorithms/21_quantization_object_timing.svg)
+## Prerequisite Reading
 
-**导语：** 先复习数据格式、参数量和 GPU 内存层级，再理解低比特量化如何改变存储、带宽和推理吞吐。
+**Overview:** First review data formats, parameter counts, and the GPU memory hierarchy, then understand how low-bit quantization changes storage, bandwidth, and inference throughput.
 
-- [01. Data Types and Precision | 大模型的数据格式与混合精度](./01_Data_Types_and_Precision.md)
-- [02. LLM Params and FLOPs | 大模型参数量与算力推导](./02_LLM_Params_and_FLOPs.md)
-- [03. GPU Architecture and Memory | GPU 物理架构与内存层级](./03_GPU_Architecture_and_Memory.md)
+- [01. Data Types and Precision](./01_Data_Types_and_Precision.md)
+- [02. LLM Params and FLOPs](./02_LLM_Params_and_FLOPs.md)
+- [03. GPU Architecture and Memory](./03_GPU_Architecture_and_Memory.md)
 
-## Q1：为什么量化能显著减少显存和带宽压力？
+## Q1: Why can quantization significantly reduce memory and bandwidth pressure?
 
 
-如果把权重从 FP16 压到 INT8，单个参数的存储从 2 Bytes 变成 1 Byte，理论上权重显存约减半；如果压到 INT4，则理论上进一步降到 0.5 Byte，权重体积还会继续下降。
+If the weights are compressed from FP16 to INT8, the storage of a single parameter changes from 2 Bytes to 1 Byte, and the weight memory is theoretically about halved; if compressed to INT4, it theoretically drops further to 0.5 Byte, and the weight volume continues to decrease.
 
-下面用一个 7B 模型例子计算不同位宽下的权重存储量：
+Below, a 7B model example computes the weight storage under different bit widths:
 
-| 权重格式 | 每参数字节数 | 7B 模型权重显存 | 相对 FP16 |
+| Weight format | Bytes per parameter | 7B model weight memory | Relative to FP16 |
 | --- | --- | --- | --- |
 | FP16 | 2 Bytes | 14 GB | 1x |
 | INT8 | 1 Byte | 7 GB | 0.5x |
 | INT4 | 0.5 Byte | 3.5 GB | 0.25x |
 
-这对推理很重要，原因不只是“模型更小了”，还因为：
-- 显存占用下降后，更大的 batch 或更长上下文更容易装进去
-- 读权重时需要搬运的数据更少，HBM 带宽压力也会下降
-- 在一些带宽受限的场景里，吞吐会明显改善
+This matters for inference, and the reason is not only that "the model is smaller", but also that:
+- With lower memory usage, a larger batch or a longer context fits more easily
+- Less data needs to be transferred when reading the weights, so HBM bandwidth pressure also drops
+- In some bandwidth-bound scenarios, throughput improves noticeably
 
-但要注意，量化通常不会让所有成本都按比特数线性下降：
-- 激活值可能仍然保留更高精度
-- 部分层会保留 FP16 / BF16 累加
-- 反量化和 scale 处理也有额外开销
-- INT8 / INT4 是否真的加速，还取决于硬件是否原生支持低比特矩阵运算；如果硬件没有对应 Tensor Core / MMA 支持，量化有时只会省显存，不一定省时间
+But note that quantization usually does not reduce all costs linearly with the bit count:
+- Activations may still be kept at higher precision
+- Some layers keep FP16 / BF16 accumulation
+- Dequantization and scale handling also have extra overhead
+- Whether INT8 / INT4 actually speed things up also depends on whether the hardware natively supports low-bit matrix operations; if the hardware has no corresponding Tensor Core / MMA support, quantization sometimes only saves memory and does not necessarily save time
 
-所以量化的收益通常是“显存更小 + 带宽更低 + 吞吐更高”，而不是单纯的“位宽缩小了多少，速度就提升多少”。
+So the benefit of quantization is usually "smaller memory + lower bandwidth + higher throughput", not simply "how much the bit width shrinks is how much the speed improves".
 
-### Q1小验证：实现模型权重显存计算函数
+### Q1 Mini Check: Implement the model weight memory function
 
-实现一个函数，计算给定参数量和数据格式的模型权重显存占用。
+Implement a function that computes the model weight memory for a given parameter count and data format.
 
 ```python
 def calculate_weight_memory(num_params_b, dtype):
     """
-    计算模型权重的显存占用。
+    Compute the memory usage of the model weights.
 
     Args:
-        num_params_b: 参数量（单位：B，即十亿）
-        dtype: 数据类型，可选 'fp16', 'bf16', 'int8', 'int4'
+        num_params_b: parameter count (unit: B, i.e. billions)
+        dtype: data type, one of 'fp16', 'bf16', 'int8', 'int4'
 
     Returns:
-        memory_gb: 显存占用（单位：GB）
+        memory_gb: memory usage (unit: GB)
     """
     bytes_per_param = {'fp16': 2, 'bf16': 2, 'int8': 1, 'int4': 0.5}[dtype]
     return num_params_b * bytes_per_param
@@ -84,16 +84,16 @@ def test_calculate_weight_memory():
     assert abs(result - 3.5) < 1e-9
     print('✅ calculate_weight_memory tests passed')
 
-# 运行测试
+# Run the test
 test_calculate_weight_memory()
 ```
 
-### Q1扩展验证：对比不同数据格式
+### Q1 Extended Check: Compare different data formats
 
-使用上面的函数，对比 7B 模型在不同数据格式下的权重显存占用。
+Use the function above to compare the weight memory of a 7B model under different data formats.
 
 ```python
-# 直接计算 7B 模型在不同格式下的权重显存占用
+# Directly compute the weight memory of a 7B model under different formats
 num_params = 7
 dtypes = ['fp16', 'bf16', 'int8', 'int4']
 
@@ -105,41 +105,41 @@ for dtype in dtypes:
 
 ```
 
-## Q2：对称量化、非对称量化、per-tensor、per-channel 有什么区别？
+## Q2: What is the difference between symmetric, asymmetric, per-tensor, and per-channel quantization?
 
 
-最常见的量化写法可以写成：
+The most common quantization form can be written as:
 
 ```text
 q = round(x / scale) + zero_point
 ```
 
-其中：
-- `scale` 决定数值映射比例
-- `zero_point` 决定零点是否偏移
+where:
+- `scale` determines the numerical mapping ratio
+- `zero_point` determines whether the zero point is shifted
 
-常见组合有四种：
-- **对称量化**：`zero_point = 0`，实现简单，常用于权重
-- **非对称量化**：保留 `zero_point`，更适合分布偏移明显的数据
-- **per-tensor**：整个张量共用一组 scale
-- **per-channel**：每个通道单独一组 scale，通常精度更好，但元数据更多
+There are four common combinations:
+- **Symmetric quantization**: `zero_point = 0`, simple to implement, often used for weights
+- **Asymmetric quantization**: keeps `zero_point`, better suited to data with an obvious distribution shift
+- **per-tensor**: the whole tensor shares one set of scales
+- **per-channel**: each channel has its own set of scales, usually with better precision but more metadata
 
-经验上：
-- 权重量化常常更适合 per-channel
-- 激活量化常常更依赖校准数据
-- 极低比特时，误差主要不来自平均值，而来自离群值和分布偏斜
+From experience:
+- Weight quantization is often better suited to per-channel
+- Activation quantization often relies more on calibration data
+- At extremely low bit widths, the error comes mainly not from the mean but from outliers and distribution skew
 
-为什么激活更难量化？
-- 权重分布通常相对稳定，离群值更少
-- 激活会随 token、层和上下文变化，分布波动更大
-- 一些激活通道可能出现明显离群值，直接压到低比特时更容易失真
-- 这也是为什么很多方案会做权重-激活协同处理，或者引入 SmoothQuant 这类预处理思路
+Why are activations harder to quantize?
+- Weight distributions are usually relatively stable and have fewer outliers
+- Activations change with the token, layer, and context, so the distribution fluctuates more
+- Some activation channels may have obvious outliers, which are more easily distorted when pressed directly into low bits
+- This is also why many schemes perform joint weight-activation handling or introduce preprocessing ideas such as SmoothQuant
 
-这也是为什么真正落地时，量化不是“把 dtype 改小”这么简单，而是要同时决定 scale、zero point、分组粒度和累加精度。
+This is also why, in real deployment, quantization is not simply "make the dtype smaller", but must simultaneously decide the scale, zero point, grouping granularity, and accumulation precision.
 
-### Q2小验证：实现最小的 per-tensor 对称量化
+### Q2 Mini Check: Implement the minimal per-tensor symmetric quantization
 
-本题只实现一个最小分支：整个张量共用一组 scale，且 zero-point 固定为 0。非对称量化和 per-channel 量化先通过概念理解，不要求在本题完整实现。`num_bits=4` 时只模拟 4-bit 的数值范围，返回的 PyTorch Tensor 仍是 `torch.int8`，不代表真实 packed INT4 存储。
+This question implements only the minimal branch: the whole tensor shares one scale, and the zero-point is fixed at 0. Asymmetric and per-channel quantization are understood conceptually first and are not required to be fully implemented here. `num_bits=4` only simulates the 4-bit numerical range; the returned PyTorch Tensor is still `torch.int8` and does not represent real packed INT4 storage.
 
 
 ```python
@@ -147,25 +147,25 @@ import torch
 
 
 def quantize_per_tensor(x, num_bits=8):
-    """对张量做对称 per-tensor 量化。
+    """Perform symmetric per-tensor quantization on a tensor.
 
-    `num_bits=4` 只控制逻辑量化范围；返回值仍用 int8 Tensor 保存，未实现 bit packing。
+    `num_bits=4` only controls the logical quantization range; the return value is still stored in an int8 Tensor, and bit packing is not implemented.
     """
     qmax = 2 ** (num_bits - 1) - 1
     scale = x.abs().max() / qmax if x.numel() > 0 else torch.tensor(1.0, device=x.device, dtype=x.dtype)
     scale = torch.clamp(scale, min=1e-8)
-    # 这里用 int8 承载量化整数，便于观察映射和误差；真实 INT4 需要额外 packing。
+    # An int8 tensor carries the quantized integers here, making the mapping and error easy to observe; real INT4 needs extra packing.
     q = torch.clamp(torch.round(x / scale), -qmax - 1, qmax).to(torch.int8)
     return q, scale
 
 
 def dequantize_per_tensor(q, scale):
-    """把量化整数恢复为 float32；不模拟真实 kernel 的累加路径。"""
+    """Restore quantized integers to float32; does not simulate the accumulation path of a real kernel."""
     return q.to(torch.float32) * scale
 
 
 def per_channel_scales(x, axis=0, num_bits=8):
-    """返回 per-channel 对称量化的 scale，只用于观察粒度差异。"""
+    """Return the scales of per-channel symmetric quantization, only to observe the granularity difference."""
     if x.ndim != 2 or axis not in (0, 1):
         raise ValueError('示例只接受二维张量，axis 必须为 0 或 1')
     qmax = 2 ** (num_bits - 1) - 1
@@ -188,13 +188,12 @@ test_quantize_per_tensor()
 
 ```
 
-### Q2扩展验证：观察量化误差
+### Q2 Extended Check: Observe the quantization error
 
-比较原始张量和反量化张量的误差。
-
+Compare the error between the original tensor and the dequantized tensor.
 
 ```python
-# 直接观察 8-bit 和 4-bit 的量化误差差异
+# Directly observe the difference in quantization error between 8-bit and 4-bit
 torch.manual_seed(0)
 x = torch.randn(1024) * 2
 
@@ -227,28 +226,28 @@ def test_quantization_practice():
 test_quantization_practice()
 ```
 
-## Q3：量化对象、处理时机和交付形式为什么会影响部署？
+## Q3: Why do the quantization object, processing timing, and delivery form affect deployment?
 
-量化方案不能只按 INT4、INT8 的位宽来命名，还要同时看它改变了哪类状态、在哪个阶段发生，以及最终由哪个 backend 解释量化产物。可以沿着下面的链条判断：
+A quantization scheme cannot be named only by the INT4 or INT8 bit width; you must also look at which kind of state it changes, at which stage it happens, and which backend finally interprets the quantized artifact. You can judge along the following chain:
 
-| 量化对象 | 处理时机 | 典型产物 | 首先验证什么 |
+| Quantization object | Processing timing | Typical artifact | What to verify first |
 |---|---|---|---|
-| 权重 | 部署前 | GPTQ / AWQ / GGUF 文件 | 是否能加载、权重显存和质量 |
-| 权重与激活 | 训练中或运行时 | QAT 模型 / FP8 路径 | kernel、数值稳定性和吞吐 |
-| KV Cache | 请求执行中 | 低比特 Cache 表示 | 上下文容量、并发、延迟和质量 |
+| Weights | Before deployment | GPTQ / AWQ / GGUF files | Whether it loads, plus weight memory and quality |
+| Weights and activations | During training or at runtime | QAT model / FP8 path | Kernels, numerical stability, and throughput |
+| KV Cache | During request execution | Low-bit cache representation | Context capacity, concurrency, latency, and quality |
 
-处理时机决定校准或训练成本，交付形式决定 backend 兼容性；因此“显存变小”只是候选收益，是否值得仍要回到固定 workload 做质量和性能验证。可以把判断顺序记成：量化对象决定影响哪类成本，处理时机决定如何获得量化参数，交付形式决定谁来解释量化产物。
+The processing timing determines the calibration or training cost, and the delivery form determines backend compatibility; therefore "smaller memory" is only a candidate gain, and whether it is worthwhile still requires quality and performance verification on a fixed workload. The judgment order can be remembered as: the quantization object determines which cost is affected, the processing timing determines how the quantization parameters are obtained, and the delivery form determines who interprets the quantized artifact.
 
-这里的 PTQ 表示训练完成后的量化，QAT 表示训练或微调过程中模拟量化误差；GPTQ 和 AWQ 是常见的权重校准路线，GGUF 是文件格式与交付封装，不等同于一种通用量化算法。
+Here PTQ means quantization after training is complete, and QAT means simulating quantization error during training or fine-tuning; GPTQ and AWQ are common weight-calibration routes, and GGUF is a file format and delivery packaging, not equivalent to a general quantization algorithm.
 
-### Q3小验证：按处理时机和交付形式整理量化方法
+### Q3 Mini Check: Organize the quantization methods by processing timing and delivery form
 
-把 PTQ、QAT、GPTQ、AWQ 和 GGUF 放回各自的层级，区分量化发生的时机、误差处理方法和最终交付形式。
+Put PTQ, QAT, GPTQ, AWQ, and GGUF back into their respective layers, distinguishing when quantization happens, how the error is handled, and the final delivery form.
 
 
 ```python
 def quantization_method_catalog():
-    """返回量化路径元数据，不代表具体 backend 的完整配置。"""
+    """Return the quantization-path metadata; does not represent the full configuration of a specific backend."""
     return {
         'PTQ': {'stage': '训练完成后', 'artifact': '量化权重', 'backend': '取决于部署引擎'},
         'QAT': {'stage': '训练或微调中', 'artifact': '量化感知模型', 'backend': '取决于部署引擎'},
@@ -259,7 +258,7 @@ def quantization_method_catalog():
 
 
 def select_quantization_path(method: str) -> dict:
-    """根据方法名返回后续实验应关注的阶段、产物和 backend。"""
+    """Return the stage, artifact, and backend that later experiments should focus on, according to the method name."""
     catalog = quantization_method_catalog()
     if method not in catalog:
         raise ValueError(f'未知量化方法：{method}，可选值：{sorted(catalog)}')
@@ -273,24 +272,24 @@ assert select_quantization_path('GGUF')['backend'] == 'llama.cpp 等'
 
 ```
 
-## Q4：量化什么时候要考虑 QAT？
+## Q4: When should quantization consider QAT?
 
 
-QAT（Quantization-Aware Training）不是第一选择，但它在以下场景里很有价值：
+QAT (Quantization-Aware Training) is not the first choice, but it is valuable in the following scenarios:
 
-- PTQ 之后精度损失过大，比如困惑度或任务指标下降明显
-- 模型本身对低比特特别敏感，尤其是较小模型或生成类任务
-- 你有足够的训练数据和算力，能够接受再训练或微调成本
+- After PTQ the accuracy loss is too large, for example a noticeable drop in perplexity or task metrics
+- The model itself is particularly sensitive to low bits, especially smaller models or generative tasks
+- You have enough training data and compute to accept the retraining or fine-tuning cost
 
-一句话判断：
-- 如果目标是“快速落地”，先用 PTQ
-- 如果目标是“把低比特精度尽量拉回来”，再考虑 QAT
+One-sentence judgment:
+- If the goal is "fast deployment", use PTQ first
+- If the goal is "recover low-bit accuracy as much as possible", then consider QAT
 
-QAT 的代价是训练流程更复杂、成本更高，但它能把量化误差直接纳入训练过程，是 PTQ 之外的重要补救路线。下面的判断只用于组织实验，不是自动证明 QAT 一定优于 PTQ；最终仍要比较固定验证集上的质量和训练成本。
+The cost of QAT is a more complex and more expensive training pipeline, but it can incorporate the quantization error directly into the training process and is an important remedy beyond PTQ. The judgment below is only used to organize experiments and does not automatically prove that QAT is necessarily better than PTQ; the quality and training cost on a fixed validation set still have to be compared.
 
-### Q4小验证：什么时候该考虑 QAT？
+### Q4 Mini Check: When should QAT be considered?
 
-把量化误差和训练预算放在一起，判断是否需要从 PTQ 转向 QAT。
+Put the quantization error and the training budget together to judge whether to move from PTQ to QAT.
 
 
 ```python
@@ -324,33 +323,33 @@ print('QAT is worth considering when PTQ drop is too large and retraining budget
 
 ```
 
-## Q5：为什么理论压缩不能直接证明低比特方案可用？
+## Q5: Why can theoretical compression not directly prove that a low-bit scheme is usable?
 
 
-位宽账本只能给出理论存储下界。要把低比特表示交给后续专题验证，还需要同时记录四类条件：
+The bit-width ledger can only give a theoretical storage lower bound. To hand the low-bit representation to later topics for verification, four kinds of conditions also need to be recorded:
 
-- **“INT4 一定比 INT8 好”**
-  不对。比特更低并不自动更优，误差和硬件支持都可能让 INT4 更难用。
+- **"INT4 is always better than INT8"**
+  Not correct. A lower bit width is not automatically better; both error and hardware support may make INT4 harder to use.
 
-- **“量化只是改一下 dtype”**
-  不对。真正的量化会涉及校准、分组、反量化、累加精度和 kernel 支持。
+- **"Quantization is just changing the dtype"**
+  Not correct. Real quantization involves calibration, grouping, dequantization, accumulation precision, and kernel support.
 
-- **“量化一定不影响效果”**
-  不对。不同层、不同通道、不同模型对低比特的容忍度差别很大。
+- **"Quantization definitely does not affect quality"**
+  Not correct. Different layers, channels, and models tolerate low bits very differently.
 
-- **“量化只影响权重”**
-  也不完整。推理时真正卡住性能的常常还包括激活、缓存和带宽。
+- **"Quantization only affects weights"**
+  It is also incomplete. What actually limits inference performance often includes activations, caches, and bandwidth as well.
 
-因此，本节只整理量化候选的数值与执行风险；质量、真实显存、执行路径和吞吐必须在量化与压缩专题的固定工作负载中验证。下面的风险函数只是教学用检查表，不是硬件性能或模型质量的预测器。
+Therefore, this section only organizes the numerical and execution risks of quantization candidates; quality, real memory, execution paths, and throughput must be verified on fixed workloads in the quantization and compression topic. The risk function below is only a teaching checklist, not a predictor of hardware performance or model quality.
 
-### Q5小验证：量化配置里最常见的问题
+### Q5 Mini Check: The most common problems in quantization configurations
 
-看看哪些配置更容易踩坑，而不是把量化简单理解成“降 dtype”。
+Look at which configurations are more likely to cause problems, instead of understanding quantization simply as "lowering the dtype".
 
 
 ```python
 def quantization_risk(bitwidth, hardware_support=True, calibration_quality=1.0, activation_sensitive=False):
-    """用可解释条件做量化风险的教学筛查，不预测真实质量或吞吐。"""
+    """Use interpretable conditions for teaching-oriented screening of quantization risk; does not predict real quality or throughput."""
     score = 0
     if bitwidth <= 4:
         score += 2
@@ -385,11 +384,11 @@ print('quantization fails when bitwidth, calibration, and hardware support are a
 ```
 
 ---
-## 相关阅读
+## Related Reading
 
-**导语：** 学完本节后，可以沿权重表示、运行时低精度和部署验证继续学习。
+**Overview:** After this section, you can continue with weight representation, runtime low precision, and deployment verification.
 
-- [25. Quantization W8A16 | W8A16 量化](../02_PyTorch_Algorithms/25_Quantization_W8A16.md)
-- [41. FP8 Runtime Low-Precision Paths | FP8 运行时低精度路径](../02_PyTorch_Algorithms/41_FP8_Runtime_Low_Precision_Paths.md)
-- [67. Quantized Inference and Deployment | 量化推理与部署](../02_PyTorch_Algorithms/67_Quantized_Inference_and_Deployment.md)
+- [25. Quantization W8A16](../02_PyTorch_Algorithms/25_Quantization_W8A16.md)
+- [41. FP8 Runtime Low-Precision Paths](../02_PyTorch_Algorithms/41_FP8_Runtime_Low_Precision_Paths.md)
+- [67. Quantized Inference and Deployment](../02_PyTorch_Algorithms/67_Quantized_Inference_and_Deployment.md)
 ---

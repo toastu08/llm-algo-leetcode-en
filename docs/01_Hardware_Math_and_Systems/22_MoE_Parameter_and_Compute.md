@@ -1,6 +1,6 @@
 # 22. MoE Parameter and Compute | MoE 模型参数量计算
 
-**难度：** Medium-Hard | **环境：** CPU-first | **标签：** `模型结构`, `MoE`, `参数与计算` | **目标人群：** 硬件约束学习者
+**Difficulty:** Medium-Hard | **Environment:** CPU-first | **Tags:** `model structure`, `MoE`, `parameters and compute` | **Audience:** learners studying hardware constraints
 
 > 🚀 **云端运行环境**
 >
@@ -12,53 +12,53 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-混合专家模型（MoE）通过增加专家扩大总参数量，但每个 Token 只激活其中一部分。总参数量、活跃计算量和专家负载因此不再同步增长。
-本节建立“路由选择 → 专家激活 → 容量与负载 → 通信代价”的关系。完成后，你应能解释稀疏激活为何可以控制计算量，以及负载不均如何削弱这种收益。
+Mixture-of-Experts (MoE) models expand the total parameter count by adding experts, but each token activates only part of them. The total parameter count, active compute volume, and expert load therefore no longer grow in sync.
+This section establishes the relationship "routing choice → expert activation → capacity and load → communication cost". After completing it, you should be able to explain why sparse activation can control the compute volume, and how imbalanced load weakens this benefit.
 
-**关键词：** 专家、路由器、负载均衡
+**Keywords:** experts, router, load balancing
 
-![本节概念关系](../public/01_Hardware_Math_and_Systems/22_moe_cost_map.svg)
+![Concept relationships in this section](../public/01_Hardware_Math_and_Systems/22_moe_cost_map.svg)
 ---
-## 前置阅读
+## Prerequisite Reading
 
-**导语：** 先复习参数量、显存和分布式通信，再观察为什么 MoE 能扩大总容量，却同时引入路由、负载均衡和专家并行通信问题。
+**Overview:** First review parameter counts, memory, and distributed communication, then observe why MoE can expand the total capacity while introducing routing, load balancing, and expert-parallel communication problems.
 
-- [01. Data Types and Precision | 大模型的数据格式与混合精度](./01_Data_Types_and_Precision.md)
-- [02. LLM Params and FLOPs | 大模型参数量与算力推导](./02_LLM_Params_and_FLOPs.md)
-- [05. Communication Topologies | 通信拓扑与分布式基石](./05_Communication_Topologies.md)
+- [01. Data Types and Precision](./01_Data_Types_and_Precision.md)
+- [02. LLM Params and FLOPs](./02_LLM_Params_and_FLOPs.md)
+- [05. Communication Topologies](./05_Communication_Topologies.md)
 ---
-## Q1：MoE 和普通 dense Transformer 的参数量差别在哪里？
+## Q1: Where does the parameter count of MoE differ from a plain dense Transformer?
 
 
-普通 dense Transformer 的每层参数主要来自：
+In a plain dense Transformer, the parameters of each layer mainly come from:
 - Attention
 - FFN / MLP
 
-而 MoE 会把原本的 FFN / MLP 替换成多个专家（experts）。粗略地说：
+MoE replaces the original FFN / MLP with multiple experts. Roughly speaking:
 
-- 一个 dense FFN 的参数量约为 `2 d d_ff`
-- 如果有 `E` 个专家，那么专家总参数量约为 `E × 2 d d_ff`
-- 但每个 token 通常只会激活 `k` 个专家，而不是全部 `E` 个
+- The parameter count of one dense FFN is about `2 d d_ff`
+- If there are `E` experts, the total expert parameter count is about `E × 2 d d_ff`
+- But each token usually activates only `k` experts rather than all `E`
 
-所以 MoE 的特点是：
-- **总参数量**：很大
-- **单 token 激活参数量**：相对没那么大
-- **单 token 计算量**：通常按 `k` 而不是按 `E` 增长
+So the characteristics of MoE are:
+- **Total parameter count**: very large
+- **Parameters activated per token**: relatively not that large
+- **Compute per token**: usually grows with `k` rather than `E`
 
-这就是为什么 MoE 常被用来扩大模型容量，但不把每次计算都线性放大。这里的“活跃参数量”只描述 token 经过的专家规模；完整的推理 FLOPs 还包括 Attention、Router、数据搬运和其他算子，不能直接把活跃参数量当成完整 FLOPs。
+This is why MoE is often used to expand model capacity without linearly scaling every computation. The "active parameter count" here only describes the expert scale that a token passes through; complete inference FLOPs also include Attention, Router, data movement, and other operators, so the active parameter count cannot be treated directly as the complete FLOPs.
 
-一个最常见的直觉例子是 Mixtral 8x7B：
+A most common intuitive example is Mixtral 8x7B:
 
-| 维度 | 量级直觉 |
+| Dimension | Order-of-magnitude intuition |
 | --- | --- |
-| 隐藏维度 `d` | 4096 |
-| 专家数 `E` | 8 |
-| 激活专家数 `k` | 2 |
-| `d_ff` | 约 `4d = 16384` |
+| Hidden dimension `d` | 4096 |
+| Number of experts `E` | 8 |
+| Activated experts `k` | 2 |
+| `d_ff` | about `4d = 16384` |
 
-如果只看专家 FFN，单个专家参数量大约是 `2 × d × d_ff ≈ 134M`，8 个专家加起来大约 `1.07B` 级别。加上 Attention、Embedding 和其他层之后，模型总参数可以到 `47B` 左右，但每个 token 实际只激活其中一小部分，常见说法是“活跃参数”大约在 `13B` 量级。
+If only the expert FFN is considered, the parameter count of a single expert is about `2 × d × d_ff ≈ 134M`, and the 8 experts add up to about the `1.07B` level. After adding Attention, Embedding, and other layers, the total model parameters can reach about `47B`, but each token actually activates only a small part of them; the common statement is that the "active parameters" are at about the `13B` level.
 
 ```mermaid
 flowchart TD
@@ -71,9 +71,9 @@ flowchart TD
     R --> EN[Expert N]
 ```
 
-### Q1小验证：计算专家参数量与活跃 FFN FLOPs
+### Q1 Mini Check: Compute expert parameter counts and active FFN FLOPs
 
-写出参数量公式，再对比 dense 和 MoE 的总参数、活跃参数与专家 FFN FLOPs。
+Write the parameter-count formulas, then compare the total parameters, active parameters, and expert FFN FLOPs of dense and MoE.
 
 ```python
 import math
@@ -82,24 +82,24 @@ from typing import Dict, List
 
 
 def dense_ffn_params(d: int, d_ff: int) -> int:
-    """Dense FFN/MLP 的参数量，按 2 * d * d_ff 估算。"""
+    """Parameter count of a dense FFN/MLP, estimated as 2 * d * d_ff."""
     return 2 * d * d_ff
 
 
 def moe_expert_params(d: int, d_ff: int, num_experts: int) -> int:
-    """MoE 所有专家的总参数量。"""
+    """Total parameter count of all MoE experts."""
     return num_experts * dense_ffn_params(d, d_ff)
 
 
 def active_expert_params(d: int, d_ff: int, active_experts: int) -> int:
-    """单个 token 激活的专家参数量。"""
+    """Parameter count of the experts activated by a single token."""
     return active_experts * dense_ffn_params(d, d_ff)
 
 
 def active_expert_ffn_flops(d: int, d_ff: int, active_experts: int, flops_per_param: int = 2) -> int:
-    """估算单 token 激活专家的 FFN 矩阵乘 FLOPs。
+    """Estimate the FFN matrix-multiplication FLOPs of the experts activated by a single token.
 
-    这里只估算专家 FFN 的乘加，不包含 Attention、Router、路由搬运和通信。
+    Only the multiply-add of the expert FFN is estimated here, excluding Attention, Router, routing transfer, and communication.
     """
     if active_experts <= 0 or flops_per_param <= 0:
         raise ValueError('active_experts 和 flops_per_param 必须为正数')
@@ -107,7 +107,7 @@ def active_expert_ffn_flops(d: int, d_ff: int, active_experts: int, flops_per_pa
 
 
 def moe_layer_params(d: int, d_ff: int, num_experts: int, include_router: bool = True) -> int:
-    """MoE 单层粗略参数量：Attention + Experts + Router。"""
+    """Rough parameter count of one MoE layer: Attention + Experts + Router."""
     attention_params = 4 * d * d
     router_params = d * num_experts if include_router else 0
     return attention_params + moe_expert_params(d, d_ff, num_experts) + router_params
@@ -154,26 +154,26 @@ print('MoE 单层粗略参数量:', to_billion(moe_layer_params(4096, 16384, 8))
 
 ```
 
-## Q2：Router / Gate 为什么重要？
+## Q2: Why is the Router / Gate important?
 
 
-Router / Gate 先根据每个 token 的分数选择 top-k 专家，再决定每个专家会不会过载，以及路由结果会不会引入额外通信和同步开销。
+The Router / Gate first selects the top-k experts according to the score of each token, then determines whether each expert will be overloaded and whether the routing result will introduce extra communication and synchronization overhead.
 
-从原理上看，Router 至少同时承担三件事：
+In principle, the Router handles at least three things at the same time:
 
-1. **选择专家**
-   - 对每个 token 打分，决定 top-k 专家是谁。
-   - 这一步决定了 token 的计算路径，不同 token 可能走完全不同的专家。
+1. **Select experts**
+   - Score each token and decide which top-k experts it goes to.
+   - This step determines the token's compute path; different tokens may go through completely different experts.
 
-2. **控制容量**
-   - 每个专家能接收的 token 数量是有限的。
-   - 如果 token 分布不均衡，某些专家会过载，部分 token 可能被丢弃或被迫重分配。
+2. **Control capacity**
+   - The number of tokens each expert can receive is limited.
+   - If the token distribution is uneven, some experts are overloaded, and some tokens may be dropped or forced to be reassigned.
 
-3. **影响训练稳定性**
-   - 如果路由长期偏向少数专家，MoE 可能退化成“少数专家在工作，其余专家闲置”。
-   - 所以很多方案会引入 load balancing loss 或容量因子，强迫路由更均匀。
+3. **Affect training stability**
+   - If routing favors a few experts for a long time, MoE may degenerate into "a few experts working while the rest are idle".
+   - Therefore many schemes introduce a load balancing loss or a capacity factor to force more even routing.
 
-这也是为什么 MoE 不只是“参数变多了”，它的工程难点其实在路由质量和负载均衡，而不是单纯在 FFN 参数本身。当前小验证只观察 top-k 路由、容量和溢出；load balancing loss 作为训练机制在这里保留概念说明，不由这段代码直接计算。
+This is also why MoE is not just "more parameters": its engineering difficulty actually lies in routing quality and load balancing rather than in the FFN parameters themselves. The current mini-check only observes top-k routing, capacity, and overflow; the load balancing loss is retained here as a conceptual description of a training mechanism and is not computed directly by this code.
 
 ```mermaid
 flowchart LR
@@ -187,23 +187,23 @@ flowchart LR
     Cap --> Balance[Load balancing / overflow]
 ```
 
-### Q2小验证：观察 Router / Gate 的容量和负载均衡
+### Q2 Mini Check: Observe the capacity and load balancing of the Router / Gate
 
-先估算每个专家的容量，再看 token 分布不均时会发生什么。
+First estimate the capacity of each expert, then see what happens when the token distribution is uneven.
 
 ```python
 def expert_capacity(num_tokens: int, num_experts: int, capacity_factor: float = 1.0) -> int:
-    """每个专家可接收的 token 数量上限。"""
+    """Upper limit of the number of tokens each expert can receive."""
     return math.ceil(num_tokens / num_experts * capacity_factor)
 
 
 def overflow_tokens(token_counts: List[int], capacity: int) -> int:
-    """给定每个专家接收的 token 数量，计算总溢出 token 数。"""
+    """Given the number of tokens each expert receives, compute the total number of overflow tokens."""
     return sum(max(0, c - capacity) for c in token_counts)
 
 
 def load_balance_stats(token_counts: List[int], capacity: int) -> Dict[str, float]:
-    """根据 Router 已产生的专家 token 数，统计容量和溢出。"""
+    """Compute capacity and overflow from the expert token counts already produced by the Router."""
     total = sum(token_counts)
     overflow = overflow_tokens(token_counts, capacity)
     return {
@@ -217,10 +217,10 @@ def load_balance_stats(token_counts: List[int], capacity: int) -> Dict[str, floa
 
 
 def route_tokens(router_scores: torch.Tensor, top_k: int = 1) -> Dict[str, object]:
-    """根据 token 对各专家的分数，选择 top-k 专家并统计分布。
+    """Select the top-k experts from the token scores for each expert and summarize the distribution.
 
-    输入形状为 `[num_tokens, num_experts]`；这里只模拟离散路由，
-    不实现专家网络、容量截断或跨设备通信。
+    The input shape is `[num_tokens, num_experts]`; this only simulates discrete routing,
+    and does not implement expert networks, capacity truncation, or cross-device communication.
     """
     if router_scores.ndim != 2:
         raise ValueError('router_scores 必须是 [num_tokens, num_experts]')
@@ -258,23 +258,23 @@ for k, v in stats.items():
 
 ```
 
-## Q3：为什么 MoE 的工程代价不只在计算，还在通信？
+## Q3: Why is the engineering cost of MoE not only in compute but also in communication?
 
 
-MoE 的额外代价主要来自专家并行（Expert Parallelism）下的 token 调度和 All-to-All 通信。
+The extra cost of MoE mainly comes from token scheduling and All-to-All communication under expert parallelism (Expert Parallelism).
 
-可以把这一层理解成：
-- token 先按 Router 的结果分发到不同专家所在的设备
-- 专家计算完成后，再把结果聚合回原来的序列位置
+This layer can be understood as:
+- Tokens are first dispatched to the devices hosting different experts according to the Router result
+- After the experts finish computing, the results are gathered back to the original sequence positions
 
-这意味着 MoE 的通信不是“顺手搬一点数据”，而是会在每一层都出现比较明确的分发 / 聚合过程。
+This means MoE communication is not "moving a bit of data along the way"; a fairly explicit dispatch / gather process appears in every layer.
 
-如果 token 数、hidden_dim 或 batch 变大，通信量就会明显增加；如果 token 分布不均衡，某些专家设备还会比别的设备更忙，进一步放大尾部等待时间。
+If the token count, hidden_dim, or batch grows, the communication volume increases noticeably; if the token distribution is uneven, some expert devices are also busier than others, further amplifying the tail waiting time.
 
-所以 MoE 的核心权衡可以概括成：
-- **容量**：更大
-- **激活计算**：不一定同比增大
-- **系统复杂度**：更高，尤其是路由、负载均衡和通信
+So the core trade-off of MoE can be summarized as:
+- **Capacity**: larger
+- **Active compute**: not necessarily larger by the same ratio
+- **System complexity**: higher, especially routing, load balancing, and communication
 
 ```mermaid
 flowchart LR
@@ -284,9 +284,10 @@ flowchart LR
     Gather --> Output[Output tokens]
 ```
 
-### Q3小验证：粗估专家并行通信量
+### Q3 Mini Check: Roughly estimate the expert-parallel communication volume
 
-先把 top-k 视为每个 token 的路由副本数，估算每层的 dispatch / gather 数据量，再看它为什么会成为 MoE 的工程代价。这个结果是容量级估算，不是 NCCL All-to-All 实测。
+First treat top-k as the number of routing copies per token, estimate the dispatch / gather data volume per layer, and then see why it becomes an engineering cost of MoE. This result is a capacity-level estimate, not a measured NCCL All-to-All.
+
 
 ```python
 def estimate_expert_parallel_traffic(
@@ -299,10 +300,10 @@ def estimate_expert_parallel_traffic(
     bytes_per_param: int = 2,
     dispatch_and_gather_factor: float = 2.0,
 ) -> int:
-    """粗略估算专家并行的通信量（字节）。
+    """Roughly estimate the expert-parallel communication volume (bytes).
 
-    这里按 token 数、hidden size、top-k 和 dispatch/gather 次数
-    做数量级估算；不代表 NCCL All-to-All 的真实 trace。
+    The order of magnitude is estimated from the token count, hidden size, top-k, and the number of
+    dispatch/gather passes; it does not represent a real NCCL All-to-All trace.
     """
     tokens = batch * seq_len
     traffic = tokens * hidden_dim * bytes_per_param
@@ -360,38 +361,38 @@ test_traffic_estimation()
 
 ```
 
-## Q4：MoE 账本还缺哪些采用证据？
+## Q4: What adoption evidence is still missing from the MoE ledger?
 
 
-参数与计算账本可以识别 MoE 容量候选，但不能直接决定采用 MoE。形成候选通常需要两个前提：
+The parameter and compute ledger can identify MoE capacity candidates, but it cannot directly decide to adopt MoE. Forming a candidate usually requires two preconditions:
 
-- 你想扩大模型容量，但不希望每次推理都把计算量一起放大
-- 你能接受更复杂的路由、调度和通信实现
+- You want to expand model capacity but do not want to scale the compute volume along with every inference
+- You can accept a more complex routing, scheduling, and communication implementation
 
-下面这些情况说明证据仍不完整：
-- 你更在意实现简单、稳定和可预测
-- 你的系统带宽 / 通信条件并不理想
-- 你很难接受路由不均衡带来的训练波动
+The following situations indicate that the evidence is still incomplete:
+- You care more about implementation simplicity, stability, and predictability
+- Your system bandwidth / communication conditions are not ideal
+- You find it hard to accept the training fluctuation caused by imbalanced routing
 
-可以先用下面的条件表记录账本信号和缺失证据，再进入架构、通信与性能专题验证：
+You can first use the condition table below to record ledger signals and missing evidence, then enter the architecture, communication, and performance topics for verification:
 
-| 账本或系统信号 | 仍需验证 |
+| Ledger or system signal | Still to verify |
 | --- | --- |
-| 总参数需求高，活跃参数明显低于总参数 | 质量、实际吞吐和显存驻留 |
-| 专家需要跨设备放置 | All-to-All 通信量、暴露时间和扩展效率 |
-| 专家负载不均或发生容量溢出 | Router 分布、overflow 和尾部等待 |
-| 服务要求实现简单、延迟可预测 | 调度复杂度、尾延迟和回退方案 |
+| High total parameter demand, active parameters clearly below the total | Quality, actual throughput, and memory residency |
+| Experts need to be placed across devices | All-to-All communication volume, exposed time, and scaling efficiency |
+| Imbalanced expert load or capacity overflow | Router distribution, overflow, and tail waiting |
+| Serving requires simple implementation and predictable latency | Scheduling complexity, tail latency, and fallback options |
 
-这张表只把理论账本转换成待测清单；最终选择仍需要记录质量、吞吐、通信时间和尾延迟。
+This table only converts the theoretical ledger into a checklist to be measured; the final choice still needs recorded quality, throughput, communication time, and tail latency.
 
-### Q4小验证：从账本生成待测清单
+### Q4 Mini Check: Generate a measurement checklist from the ledger
 
-把容量需求、通信条件、负载均衡和工程简洁度转换成后续需要补齐的证据。
+Convert the capacity requirement, communication conditions, load balancing, and engineering simplicity into evidence that needs to be collected afterward.
 
 
 ```python
 def moe_follow_up_evidence(capacity_need, communication_ready, load_balance_ok, simplicity_priority):
-    """把 MoE 账本信号转换成后续待测证据，不直接给出采用决策。"""
+    """Convert MoE ledger signals into follow-up evidence to measure, without giving an adoption decision directly."""
     flags = [capacity_need, communication_ready, load_balance_ok, simplicity_priority]
     if not all(isinstance(value, bool) for value in flags):
         raise TypeError('四个条件必须是 bool')
@@ -425,9 +426,9 @@ print('✅ MoE 待测证据清单检查通过')
 ```
 
 ---
-## 相关阅读
+## Related Reading
 
-**导语：** 把参数与计算账本接到 Router 和专家并行，继续观察 capacity、overflow 与跨卡 token 交换。
+**Overview:** Connect the parameter and compute ledger to the Router and expert parallelism, and continue observing capacity, overflow, and cross-GPU token exchange.
 
 - [Part 02 · 06 MoE Router](../02_PyTorch_Algorithms/06_MoE_Router.md)
 - [Part 02 · 07 MoE Load Balancing](../02_PyTorch_Algorithms/07_MoE_Load_Balancing_Loss.md)

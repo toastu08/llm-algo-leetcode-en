@@ -1,6 +1,6 @@
 # 02. LLM Params and FLOPs | 大模型参数量与算力推导
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `数值基础`, `参数估算`, `FLOPs` | **目标人群：** 需要估算模型规模与计算预算的学习者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `numerical foundations`, `parameter estimation`, `FLOPs` | **Audience:** learners who need to estimate model scale and compute budgets
 
 > 🚀 **云端运行环境**
 >
@@ -12,68 +12,68 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-模型名称里的 7B、14B 或 70B 只是规模标签。要判断模型能否装入显存以及一次训练或推理需要多少计算，还要结合层数、隐藏维度、词表、前馈网络结构和 Token 数。
-本节建立“模型结构 → 参数量 → 工作负载计算量 → 模型 FLOPs 利用率（MFU）”的估算链。完成后，你应能把模型配置转换成参数与计算预算，并区分理论计算量与实测吞吐。
+The 7B, 14B, or 70B in a model name is only a scale label. To judge whether a model fits in memory and how much compute one training or inference run needs, you also need the layer count, hidden dimension, vocabulary, feed-forward network structure, and token count.
+This section establishes the estimation chain "model structure → parameter count → workload compute volume → model FLOPs utilization (MFU)". After completing it, you should be able to convert a model configuration into a parameter and compute budget and distinguish theoretical compute volume from measured throughput.
 
-**关键词：** 参数量、`FLOPs`、`MFU`
+**Keywords:** parameter count, `FLOPs`, `MFU`
 
-![本节概念关系](../public/01_Hardware_Math_and_Systems/02_params_flops_chain.svg)
-
----
-## 前置阅读
-**导语：** 进入本节前，先确认参数量如何进入 FLOPs 计算，再把前向、训练和硬件利用率放到同一条估算链上；这些数值会在后续微调、性能分析和 GPU 实验中继续使用。
-
-- [01. Data Types and Precision | 大模型的数据格式与混合精度](./01_Data_Types_and_Precision.md)
-- [Group 0B: PyTorch Tensors and Autograd | 0B: PyTorch 张量与自动求导](../00_Prerequisites/0B.md)
+![Concept relationships in this section](../public/01_Hardware_Math_and_Systems/02_params_flops_chain.svg)
 
 ---
-## Q1：假设隐藏层维度为 $d$，词表大小为 $V$。请推导一个 Decoder 的总参数量，并比较标准 FFN 与 SwiGLU。
+## Prerequisite Reading
+**Overview:** Before entering this section, confirm how the parameter count enters the FLOPs computation, then put forward computation, training, and hardware utilization on the same estimation chain; these values will continue to be used in later fine-tuning, performance analysis, and GPU experiments.
+
+- [01. Data Types and Precision](./01_Data_Types_and_Precision.md)
+- [Group 0B: PyTorch Tensors and Autograd](../00_Prerequisites/0B.md)
+  
+---
+## Q1: Assume the hidden dimension is $d$ and the vocabulary size is $V$. Derive the total parameter count of one Decoder, and compare a standard FFN with SwiGLU.
 
 
-我们把 Transformer 拆解为三大部分（忽略极小的 bias 和 LayerNorm 的权重，它们对百亿参数的占比不到千分之一）：
+We break the Transformer into three parts (ignoring the very small bias and LayerNorm weights, whose share of a hundred-billion-parameter model is less than one thousandth):
 
-**1. 嵌入层 (Embedding Layer) 与 输出层 (LM Head)**
-- Token Embedding: 形状 $[V, d]$，参数量为 $V \times d$。
-- LM Head (输出映射): 形状 $[d, V]$，参数量为 $V \times d$。
-- *(注：很多模型如 Gemma/Qwen 会共享这两个权重，参数量减半。这里我们假设不共享)*。
+**1. Embedding Layer and Output Layer (LM Head)**
+- Token Embedding: shape $[V, d]$, parameter count $V \times d$.
+- LM Head (output projection): shape $[d, V]$, parameter count $V \times d$.
+- *(Note: many models such as Gemma/Qwen share these two weights, halving the parameter count. Here we assume they are not shared)*.
 
-**2. 注意力机制 (Multi-Head Attention, MHA)**
-在每个 Decoder 块中：
-- 投影 Q, K, V：三个形状为 $[d, d]$ 的矩阵。参数量 $3d^2$。
-- 投影 Output (O)：一个形状为 $[d, d]$ 的矩阵。参数量 $d^2$。
-- **MHA 总参数量 = $4d^2$**。
-*(如果采用 GQA，K 和 V 的参数量会大幅减少，这里按最原始的 MHA 计算)*。
+**2. Attention Mechanism (Multi-Head Attention, MHA)**
+In each Decoder block:
+- Project Q, K, V: three matrices of shape $[d, d]$. Parameter count $3d^2$.
+- Project Output (O): one matrix of shape $[d, d]$. Parameter count $d^2$.
+- **Total MHA parameter count = $4d^2$**.
+*(If GQA is used, the parameter count of K and V decreases significantly; here it is computed as the original MHA)*.
 
-**3. 前馈神经网络 (Feed Forward Network, FFN / MLP)**
-在标准 GPT 架构中，隐藏层会先升维到 $4d$，再降维回 $d$：
-- 升维矩阵 $W_{up}$：$[d, 4d]$，参数量 $4d^2$。
-- 降维矩阵 $W_{down}$：$[4d, d]$，参数量 $4d^2$。
-- **FFN 总参数量 = $8d^2$**。
-*(如果在 LLaMA 中使用 SwiGLU，通常会把中间维度缩放到约 $\frac{8}{3}d$；虽然有 3 个矩阵，但总参数量仍约为 $3 \times \frac{8}{3}d^2 = 8d^2$。如果直接使用 $4d$ 作为 SwiGLU 中间维度，参数量会变成 $12d^2$，不能与标准 FFN 的公式混用。)*
+**3. Feed Forward Network (FFN / MLP)**
+In the standard GPT architecture, the hidden layer is first expanded to $4d$ and then projected back to $d$:
+- Expansion matrix $W_{up}$: $[d, 4d]$, parameter count $4d^2$.
+- Projection matrix $W_{down}$: $[4d, d]$, parameter count $4d^2$.
+- **Total FFN parameter count = $8d^2$**.
+*(If SwiGLU is used in LLaMA, the intermediate dimension is usually scaled to about $\frac{8}{3}d$; although there are 3 matrices, the total parameter count is still about $3 \times \frac{8}{3}d^2 = 8d^2$. If $4d$ is used directly as the SwiGLU intermediate dimension, the parameter count becomes $12d^2$ and cannot be mixed with the standard FFN formula.)*
 
-**综上所述：**
-- 一个 Block 的参数量 = $4d^2$ (Attn) + $8d^2$ (MLP) = **$12d^2$**。
-- 总参数量 $\approx 2Vd + L \times 12d^2$。
+**In summary:**
+- Parameter count of one Block = $4d^2$ (Attn) + $8d^2$ (MLP) = **$12d^2$**.
+- Total parameter count $\approx 2Vd + L \times 12d^2$.
 
-*以一个约 7B 参数规模的配置为例：$d=4096, L=32, V=32000$*
-*Block 参数 = $32 \times 12 \times 4096^2 \approx 6.4 \text{ Billion}$*
+*Take a configuration with about 7B parameters as an example: $d=4096, L=32, V=32000$*
+*Block parameters = $32 \times 12 \times 4096^2 \approx 6.4 \text{ Billion}$*
 *Embedding = $2 \times 32000 \times 4096 \approx 0.26 \text{ Billion}$*
-*总计约 6.7B，也就是所谓的 7B 模型！*
+*The total is about 6.7B, which is the so-called 7B model!*
 
-### Q1小验证：参数量计算
+### Q1 Mini Check: Parameter count computation
 
-运行参考函数，显式选择标准 FFN 或 SwiGLU，比较词嵌入是否共享时的参数量。断言失败会直接报错，便于定位公式或实现偏差。
+Run the reference function, explicitly choose the standard FFN or SwiGLU, and compare the parameter counts with and without shared word embeddings. A failed assertion raises an error directly, making it easy to locate a formula or implementation deviation.
 
 
 ```python
 def calculate_transformer_params(vocab_size, hidden_dim, num_layers, intermediate_size=None, tie_embeddings=False, ffn_type='swiglu'):
-    """按 dense Decoder-only Transformer 的简化结构估算参数量。
+    """Estimate the parameter count from the simplified structure of a dense Decoder-only Transformer.
 
-    忽略 bias、具体 norm 变体和 MoE 路由差异；结果用于数量级预算，
-    不替代具体模型 config 或 checkpoint 的参数统计。
-    ffn_type='dense' 使用两个 FFN 矩阵；ffn_type='swiglu' 使用三个矩阵。
+    Ignores bias, specific norm variants, and MoE routing differences; the result is for an order-of-magnitude budget
+    and does not replace the parameter statistics of a specific model config or checkpoint.
+    ffn_type='dense' uses two FFN matrices; ffn_type='swiglu' uses three matrices.
     """
     if min(vocab_size, hidden_dim, num_layers) <= 0:
         raise ValueError('vocab_size、hidden_dim 和 num_layers 必须为正数')
@@ -114,9 +114,9 @@ def test_calculate_transformer_params():
 test_calculate_transformer_params()
 ```
 
-### Q1扩展验证：估算 7B 级配置的参数量
+### Q1 Extended Check: Estimate the parameter count of a 7B-level configuration
 
-修改词表、隐藏维度、层数或前馈中间维度，观察总参数量；比较时只改变一项。
+Change the vocabulary, hidden dimension, layer count, or feed-forward intermediate dimension and observe the total parameter count; change only one item at a time when comparing.
 
 
 ```python
@@ -130,35 +130,36 @@ print(f"估算参数量: {total_params / 1e9:.2f}B")
 print("提示：不同实现会因为是否共享词嵌入、是否计入偏置而略有差异。")
 ```
 
-## Q2：已知参数量和 token 数，一次前向需要多少 FLOPs？
+## Q2: Given the parameter count and token count, how many FLOPs does one forward pass need?
 
 
-这一问只计算一次前向的 FLOPs；训练阶段为什么需要更多计算，放到下一问拆解。这里的公式是 dense Transformer 的数量级估算，不把前向 FLOPs 当成完整训练成本。
+This question computes only the FLOPs of one forward pass; why the training stage needs more compute is broken down in the next question. The formula here is an order-of-magnitude estimate for a dense Transformer and does not treat forward FLOPs as the complete training cost.
 
-在了解了参数量之后，我们来看大模型在进行推理（前向传播）时需要多少算力。
+Having understood the parameter count, let us look at how much compute a large model needs for inference (forward propagation).
 
-**核心数量级估算：对 dense Transformer，1 个参数处理 1 个 Token 常用约 2 次浮点运算（FLOPs）估算。**
-为什么是 2 次？因为在矩阵乘法 $Y = W \times X$ 中，对于每一个权重元素，我们需要做一次**乘法**和一次**加法**（Multiply-Accumulate, MAC）。
+**Core order-of-magnitude estimate: for a dense Transformer, 1 parameter processing 1 token is commonly estimated at about 2 floating-point operations (FLOPs).**
+Why 2? Because in the matrix multiplication $Y = W \times X$, for each weight element we need one **multiplication** and one **addition** (Multiply-Accumulate, MAC).
 
-**推理 FLOPs 公式：**
+**Inference FLOPs formula:**
 $$ C_{forward} \approx 2 \times P \times T $$
-其中：
-- $C_{forward}$ 是前向传播需要的计算量（FLOPs）
-- $P$ 是模型的总参数量（Parameters）
-- $T$ 是处理的 Token 数量（Tokens）
+where:
+- $C_{forward}$ is the compute needed for forward propagation (FLOPs)
+- $P$ is the total parameter count of the model (Parameters)
+- $T$ is the number of tokens processed (Tokens)
 
-*(注：这里忽略了 Attention 矩阵乘积、归一化、激活函数、padding 和其他算子；占比会随序列长度、模型结构和 batch 改变，不能固定写成 99%。)*
+*(Note: this ignores the Attention matrix products, normalization, activation functions, padding, and other operators; their share changes with sequence length, model structure, and batch, and cannot be fixed at 99%.)*
 
-### Q2小验证：根据参数量和 token 数计算前向 FLOPs
+### Q2 Mini Check: Compute forward FLOPs from the parameter count and token count
 
-先用 `2 × 参数量 × token 数` 估算一次前向。训练 FLOPs 的拆分放到下一问，避免把公式结论提前当作机制解释。
+First estimate one forward pass with `2 × parameter count × token count`. The breakdown of training FLOPs is left to the next question, to avoid treating the formula's conclusion as a mechanism explanation in advance.
+
 
 ```python
 def calculate_forward_flops(num_params_b, num_tokens, flops_per_param_token=2):
-    """粗估 dense Transformer 一次前向的 FLOPs。
+    """Roughly estimate the FLOPs of one forward pass of a dense Transformer.
 
-    默认 2 FLOPs/parameter/token 是乘加操作的教学近似，
-    不包含序列长度相关的 attention 项、归一化和其他算子。
+    The default 2 FLOPs/parameter/token is a teaching approximation for multiply-accumulate operations,
+    excluding sequence-length-dependent attention terms, normalization, and other operators.
     """
     if num_params_b < 0 or num_tokens < 0 or flops_per_param_token < 0:
         raise ValueError('参数量、token 数和 FLOPs 系数不能为负数')
@@ -177,13 +178,14 @@ def test_calculate_flops():
 test_calculate_flops()
 ```
 
-### Q2扩展验证：观察前向 FLOPs 对 token 数的敏感性
+### Q2 Extended Check: Observe the sensitivity of forward FLOPs to the token count
 
-固定参数量，比较不同 token 数下的一次前向 FLOPs；训练时间估算放到 Q3。
+Fix the parameter count and compare the forward FLOPs under different token counts; the training-time estimate is left to Q3.
+
 
 ```python
 def compare_forward_token_scales(num_params_b, token_counts):
-    """比较不同 token 数下的一次前向 FLOPs；结果不是实测耗时。"""
+    """Compare the forward FLOPs under different token counts; the result is not measured elapsed time."""
     if not token_counts or any(tokens < 0 for tokens in token_counts):
         raise ValueError('token_counts 不能为空且不能包含负数')
     return {tokens: calculate_forward_flops(num_params_b, tokens) for tokens in token_counts}
@@ -194,49 +196,50 @@ for tokens, flops in compare_forward_token_scales(7, [1_000, 8_000, 32_000]).ite
 
 ```
 
-## Q3：完整训练为什么比一次前向需要更多 FLOPs？
+## Q3: Why does full training need more FLOPs than one forward pass?
 
 
-训练不仅包含前向传播计算损失，还包含反向传播计算梯度。
+Training not only includes forward propagation to compute the loss, but also backward propagation to compute gradients.
 
-在反向传播中，我们需要：
-1. 计算激活值（Activations）的梯度，以便将误差继续向后传（大约需要 $2 \times P \times T$ FLOPs）。
-2. 计算权重（Weights）的梯度，用于模型参数更新（大约也需要 $2 \times P \times T$ FLOPs）。
+In backward propagation, we need to:
+1. Compute the gradients of the activations, so that the error can continue to be propagated backward (about $2 \times P \times T$ FLOPs).
+2. Compute the gradients of the weights, used to update the model parameters (about $2 \times P \times T$ FLOPs as well).
 
-因此，反向传播的计算量大约是前向传播的 **2 倍**。
+Therefore, the compute of backward propagation is about **2 times** that of forward propagation.
 
-**训练 FLOPs 公式（数量级近似）：**
+**Training FLOPs formula (order-of-magnitude approximation):**
 $$ C_{train} = C_{forward} + C_{backward} \approx 2PT + 4PT = 6 \times P \times T $$
 
-**不同训练方式的口径：**
-| 训练方式 | 前向与反向 | 优化器状态 | 底座权重 | 本节处理方式 |
+**Accounting for different training modes:**
+| Training mode | Forward and backward | Optimizer state | Base weights | Treatment in this section |
 |---|---|---|---|---|
-| 全参数训练 / 微调 | 全模型参与 | 覆盖全部参数 | 通常可更新 | 作为 `6PT` 基线 |
-| LoRA | 经过底座并更新 Adapter | 主要维护 Adapter | 通常冻结 | 只作概念对照 |
-| QLoRA | 量化底座参与计算并更新 Adapter | 主要维护 Adapter | 低比特冻结 | 只作资源边界说明 |
+| Full-parameter training / fine-tuning | The whole model participates | Covers all parameters | Usually updatable | Used as the `6PT` baseline |
+| LoRA | Passes through the base and updates the Adapter | Mainly maintains the Adapter | Usually frozen | Only a conceptual comparison |
+| QLoRA | The quantized base participates in computation and the Adapter is updated | Mainly maintains the Adapter | Low-bit frozen | Only a resource-boundary description |
 
-LoRA 和 QLoRA 的收益不能只从 FLOPs 公式判断；激活、量化反量化、kernel 和实际 workload 仍需在 Part02 项目中测量。
+The gains of LoRA and QLoRA cannot be judged from the FLOPs formula alone; activations, quantize-dequantize, kernels, and the actual workload still need to be measured in the Part 02 projects.
 
-**实战估算：**
-假设我们要从头预训练一个 LLaMA-7B（70亿参数）模型，训练数据量是 1T（1万亿）个 Tokens。
-需要的总理论算力 $C = 6 \times (7 \times 10^9) \times (1 \times 10^{12}) = 4.2 \times 10^{22}$ FLOPs。
+**Practical estimate:**
+Suppose we want to pretrain a LLaMA-7B (7 billion parameters) model from scratch with 1T (1 trillion) tokens of training data.
+The required total theoretical compute is $C = 6 \times (7 \times 10^9) \times (1 \times 10^{12}) = 4.2 \times 10^{22}$ FLOPs.
 
-如果按每张 A100 的 312 TFLOPs 理论峰值、35% 的有效效率和 1000 张卡估算，有效集群算力约为 $1000 \times 312 \times 0.35$ TFLOPs，训练时间约为 4.5 天。这个结果随效率假设变化，只用于建立数量级直觉。
+If we estimate with 312 TFLOPs theoretical peak per A100, 35% effective efficiency, and 1000 GPUs, the effective cluster compute is about $1000 \times 312 \times 0.35$ TFLOPs, and the training time is about 4.5 days. This result changes with the efficiency assumption and is only used to build order-of-magnitude intuition.
 
-### Q3小验证：拆分训练 FLOPs 并估算场景时间
+### Q3 Mini Check: Break down training FLOPs and estimate scenario time
 
-先把前向、激活梯度和权重梯度拆开，再把总 FLOPs 接到不同 GPU 规模的训练时间估算。
+First split forward, activation gradients, and weight gradients, then feed the total FLOPs into training-time estimates for different GPU scales.
+
 
 ```python
 def calculate_training_flops(num_params_b, num_tokens, flops_per_param_token=6):
-    """粗估 dense Transformer 训练 FLOPs，不代表真实训练耗时。"""
+    """Roughly estimate the training FLOPs of a dense Transformer; not the real training elapsed time."""
     if num_params_b < 0 or num_tokens < 0 or flops_per_param_token < 0:
         raise ValueError('参数量、token 数和 FLOPs 系数不能为负数')
     return num_params_b * 1_000_000_000 * num_tokens * flops_per_param_token
 
 
 def estimate_training_time(num_params_b, num_tokens, gpu_tflops, num_gpus, efficiency=0.35):
-    """按理论训练 FLOPs 和假设效率估算时间，不是 GPU 实测时间。"""
+    """Estimate the time from theoretical training FLOPs and an assumed efficiency; not measured GPU time."""
     if gpu_tflops <= 0 or num_gpus <= 0 or not 0 < efficiency <= 1:
         raise ValueError('gpu_tflops、num_gpus 必须为正数，efficiency 必须在 (0, 1]')
     total_flops = calculate_training_flops(num_params_b, num_tokens)
@@ -245,7 +248,7 @@ def estimate_training_time(num_params_b, num_tokens, gpu_tflops, num_gpus, effic
 
 
 def training_flops_breakdown(num_params_b, num_tokens):
-    """拆出前向、反向和训练总 FLOPs；是 dense Transformer 的数量级模型。"""
+    """Split out the forward, backward, and total training FLOPs; an order-of-magnitude model for a dense Transformer."""
     forward = calculate_forward_flops(num_params_b, num_tokens)
     activation_backward = 2 * num_params_b * 1_000_000_000 * num_tokens
     weight_backward = 2 * num_params_b * 1_000_000_000 * num_tokens
@@ -275,28 +278,28 @@ for name, gpu_tflops, num_gpus, eff in scenarios:
     print(f"{name:<16} {hours:>12.1f} 小时  ({hours/24:>8.1f} 天)")
 ```
 
-## Q4：训练大模型时，什么是算力利用率 (MFU, Model FLOPs Utilization)？
+## Q4: When training large models, what is compute utilization (MFU, Model FLOPs Utilization)?
 
 
-通过前面的 Q3 我们算出了**理论所需算力**。但在实际工程中，硬件不会把所有时间都花在矩阵乘法上。这就引入了 MFU；它是观察模型计算利用率的一个重要指标，但不能单独代表训练工程质量。
+Through Q3 above we computed the **theoretically required compute**. But in real engineering, the hardware does not spend all its time on matrix multiplication. This brings in MFU; it is an important indicator for observing model compute utilization, but it cannot by itself represent training engineering quality.
 
-- **理论算力 (Peak FLOPs)**：显卡说明书上写的算力。比如 A100 BF16 理论峰值是 312 TFLOPs（每秒执行 312 万亿次浮点运算）。
-- **实际算力 (Observed FLOPs)**：即我们用 $6PT$ 算出的整个训练所需的理论运算量，除以跑完这些步骤所花的**实际时间**。
-- **MFU = 实际模型 FLOPs / 硬件理论峰值 FLOPs**。实际模型 FLOPs 通常需要结合模型结构和 token 数估算，不能直接把一个时间占比当成 MFU。
+- **Theoretical compute (Peak FLOPs)**: the compute written on the graphics card specification. For example, the theoretical BF16 peak of A100 is 312 TFLOPs (312 trillion floating-point operations per second).
+- **Actual compute (Observed FLOPs)**: that is, the theoretical computation volume $6PT$ required for the whole training divided by the **actual time** spent completing these steps.
+- **MFU = actual model FLOPs / theoretical hardware peak FLOPs**. Actual model FLOPs usually need to be estimated together with the model structure and token count; a time-share ratio cannot be treated directly as the MFU.
 
-**为什么 MFU 很难达到 100%？**
-因为在真正的训练集群中，存在 **Memory-bound (显存墙)** 和 **Communication (通信瓶颈)**。GPU 很多时间在等待数据从内存搬运过来，或者在等其他机器的 All-Reduce 数据传过来，并没有在做有效的乘加运算。
+**Why is MFU hard to reach 100%?**
+Because in a real training cluster there are the **Memory-bound (memory wall)** and **Communication (communication bottleneck)** problems. The GPU spends a lot of time waiting for data to be moved from memory, or waiting for the All-Reduce data from other machines, without doing effective multiply-add operations.
 
-MFU 没有脱离模型、精度、硬件、并行方式和统计口径的通用合格线。较低的 MFU 只能说明需要继续检查，不能单独证明通信或 I/O 是主瓶颈；应把它与时间线、访存、通信和输入流水线记录一起交给性能分析。
+MFU has no universal passing line independent of the model, precision, hardware, parallel mode, and statistical convention. A low MFU only indicates that further checks are needed and cannot by itself prove that communication or I/O is the main bottleneck; it should be handed to performance analysis together with timeline, memory-access, communication, and input-pipeline records.
 
-### Q4小验证：计算时间占比与瓶颈分解
+### Q4 Mini Check: Compute time-share and bottleneck decomposition
 
-把计算、显存等待和通信等待拆开，观察时间线上哪些部分在拖慢执行。下面同时给出 MFU 的公式估算和时间线占比：前者使用模型 FLOPs、实际耗时与硬件峰值，后者只描述时间线上计算与等待的比例，两者不能互相替代。
+Separate compute, memory waiting, and communication waiting to observe which parts of the timeline are slowing down execution. Both the MFU formula estimate and the timeline share are given below: the former uses model FLOPs, actual elapsed time, and hardware peak, and the latter only describes the proportion of compute and waiting on the timeline; the two cannot replace each other.
 
 
 ```python
 def calculate_mfu(model_flops, elapsed_seconds, peak_tflops):
-    """根据模型 FLOPs、实际耗时和硬件峰值估算 MFU；不是 profiler 实测值。"""
+    """Estimate MFU from model FLOPs, actual elapsed time, and hardware peak; not a profiler measurement."""
     if model_flops < 0 or elapsed_seconds <= 0 or peak_tflops <= 0:
         raise ValueError('model_flops 不能为负数，elapsed_seconds 和 peak_tflops 必须为正数')
     achieved_flops = model_flops / elapsed_seconds
@@ -332,11 +335,11 @@ print('A high compute-time fraction does not by itself prove high MFU')
 
 ---
 
-## 相关阅读
-本节可以继续接到模型配置、显存预算和 MoE 参数—计算账本。
-- [Hugging Face Transformers 模型配置](https://huggingface.co/docs/transformers/main_classes/configuration)：查看 hidden size、层数、词表和 attention 配置如何落到参数估算。
-- [06. VRAM Calculation and ZeRO | 显存计算与 ZeRO 优化](./06_VRAM_Calculation_and_ZeRO.md)
-- [22. MoE Parameter and Compute | MoE 模型参数量计算](./22_MoE_Parameter_and_Compute.md)
+## Related Reading
+This section can continue into model configuration, the memory budget, and the MoE parameter-compute ledger.
+- [Hugging Face Transformers model configuration](https://huggingface.co/docs/transformers/main_classes/configuration): see how hidden size, layer count, vocabulary, and attention configuration feed into the parameter estimate.
+- [06. VRAM Calculation and ZeRO](./06_VRAM_Calculation_and_ZeRO.md)
+- [22. MoE Parameter and Compute](./22_MoE_Parameter_and_Compute.md)
 
-
+  
 ---

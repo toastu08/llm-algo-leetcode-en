@@ -1,6 +1,6 @@
 # 23. TensorCore Deep Dive | Tensor Core 深度剖析
 
-**难度：** Hard | **环境：** CPU-first | **标签：** `硬件系统`, `Tensor Core`, `MMA` | **目标人群：** 需要理解矩阵计算硬件路径的学习者
+**Difficulty:** Hard | **Environment:** CPU-first | **Tags:** `hardware systems`, `Tensor Core`, `MMA` | **Audience:** learners who need to understand the hardware path of matrix computation
 
 > 🚀 **云端运行环境**
 >
@@ -12,34 +12,34 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-Tensor Core 只有在数据类型、矩阵形状、内存布局和寄存器资源满足条件时，才能执行矩阵乘加（MMA）路径。理论峰值不能替代对实际输入与资源约束的检查。
-本节建立“矩阵分块 → 数据布局 → MMA 执行 → 资源限制”的关系。完成后，你应能判断输入是否具备 Tensor Core 候选条件，并区分理论路径与真实吞吐。
+A Tensor Core can execute the matrix multiply-add (MMA) path only when the data type, matrix shape, memory layout, and register resources meet the conditions. Theoretical peak cannot replace checking the actual input and resource constraints.
+This section establishes the relationship "matrix tiling → data layout → MMA execution → resource limits". After completing it, you should be able to judge whether an input meets the Tensor Core candidate conditions and distinguish theoretical paths from real throughput.
 
-**关键词：** `MMA`、矩阵分块、吞吐
+**Keywords:** `MMA`, matrix tiling, throughput
 
-![本节概念关系](../public/01_Hardware_Math_and_Systems/23_tensorcore_execution_map.svg)
+![Concept relationships in this section](../public/01_Hardware_Math_and_Systems/23_tensorcore_execution_map.svg)
 
 
 ---
-## 前置阅读
+## Prerequisite Reading
 
-**导语：** 先回顾矩阵乘加、混合精度和 CUDA 执行粒度，再理解 Tensor Core 为什么要求输入数据按照特定 tile 组织。
+**Overview:** First review matrix multiply-add, mixed precision, and CUDA execution granularity, then understand why the Tensor Core requires input data to be organized into specific tiles.
 
-- [15. CUDA Execution Model | CUDA 执行模型](./15_CUDA_Execution_Model.md)
-- [16. Warp Block SharedMemory Basics | Warp、Block 与 Shared Memory 基础](./16_Warp_Block_SharedMemory_Basics.md)
-- [12. TensorCore and Mixed Precision | Tensor Core 与混合精度](./12_TensorCore_and_Mixed_Precision.md)
+- [15. CUDA Execution Model](./15_CUDA_Execution_Model.md)
+- [16. Warp Block SharedMemory Basics](./16_Warp_Block_SharedMemory_Basics.md)
+- [12. TensorCore and Mixed Precision](./12_TensorCore_and_Mixed_Precision.md)
 ---
-## Q1：Tensor Core 本质上是什么？
+## Q1: What is the Tensor Core essentially?
 
 
-Tensor Core 不是普通 CUDA Core 的更快版本，而是一条专门面向矩阵乘加（MMA）的硬件路径。
+The Tensor Core is not a faster version of an ordinary CUDA Core, but a hardware path specifically oriented to matrix multiply-add (MMA).
 
-它的关键变化有三点：
-- 计算对象从标量 FMA 变成了小块矩阵乘加；
-- 调度粒度从逐元素运算变成了可打包的 tile；
-- 数据路径从“多次标量访存”转成“先聚成块，再一次性做矩阵累加”。
+Its key changes are three:
+- The computation object changes from scalar FMA to small-block matrix multiply-add;
+- The scheduling granularity changes from per-element operations to packable tiles;
+- The data path changes from "many scalar memory accesses" to "gather into a block first, then perform matrix accumulation at once".
 
 ```mermaid
 flowchart LR
@@ -49,11 +49,11 @@ flowchart LR
     B -. lower efficiency .-> E
 ```
 
-所以 Tensor Core 更像是矩阵计算的专用引擎：它不是把同样的工作做得更快一点，而是把工作重新组织成更适合硬件吞吐的形状。
+So the Tensor Core is more like a dedicated engine for matrix computation: it does not make the same work a little faster, but reorganizes the work into a shape better suited to hardware throughput.
 
-### Q1小验证：比较矩阵乘加与标量 FMA
+### Q1 Mini Check: Compare matrix multiply-add with scalar FMA
 
-对照两种计算粒度，说明 tile 化矩阵乘加为何更适合 Tensor Core。
+Compare the two computation granularities to explain why tiled matrix multiply-add is better suited to the Tensor Core.
 
 ```python
 def mma_flops(m, n, k):
@@ -62,17 +62,17 @@ def mma_flops(m, n, k):
 print(mma_flops(16, 16, 16) / 1e3, 'KFLOPs for one 16x16x16 MMA')
 ```
 
-## Q2：哪些 dtype 和累加方式具备进入 Tensor Core 的候选条件？
+## Q2: Which dtypes and accumulation modes meet the candidate conditions for entering the Tensor Core?
 
 
-混合精度之所以有效，是因为“输入 / 累加 / 输出”这三段不必使用同一种位宽。
+Mixed precision is effective because the three segments "input / accumulation / output" do not need to use the same bit width.
 
-常见做法是：
-- 输入和权重用较低精度，减少搬运和打包成本；
-- 累加保留更高精度，避免误差快速放大；
-- 某些中间结果再按需要回到更低精度或保持高精度。
+A common practice is:
+- Use lower precision for inputs and weights to reduce transfer and packing cost;
+- Keep higher precision for accumulation to avoid rapidly amplifying the error;
+- Return some intermediate results to lower precision or keep them at high precision as needed.
 
-能否进入 Tensor Core 候选路径还取决于 GPU 架构、驱动和具体 kernel 的支持。代码中的 `supported_dtypes` 是待测硬件的配置输入，不应被理解为所有 GPU 都原生支持这些格式；可分配某种 dtype，也不等于它一定获得 Tensor Core 加速。
+Whether the Tensor Core candidate path can be entered also depends on the support of the GPU architecture, driver, and specific kernel. The `supported_dtypes` in the code is a configuration input of the hardware to be tested and should not be understood as all GPUs natively supporting these formats; being able to allocate a certain dtype does not mean it will necessarily get Tensor Core acceleration.
 
 ```mermaid
 flowchart LR
@@ -82,18 +82,18 @@ flowchart LR
     D --> E[Better bandwidth / latency balance]
 ```
 
-所以混合精度不是单纯“降精度”，而是在精度和吞吐之间拆分职责：把最贵的搬运和最需要吞吐的部分放到更合适的位宽和硬件路径上。
+So mixed precision is not simply "lowering precision", but splitting responsibilities between precision and throughput: putting the most expensive transfer and the parts that most need throughput onto more suitable bit widths and hardware paths.
 
-### Q2小验证：检查 dtype、累加类型与候选路径
+### Q2 Mini Check: Check the dtype, accumulation type, and candidate path
 
-对照输入和累加类型，区分理论存储量与进入候选路径的条件。
+Compare the input and accumulation types to distinguish the theoretical storage volume from the conditions for entering the candidate path.
 
 ```python
 def tensorcore_dtype_path(input_dtype, accumulation_dtype, numel, supported_dtypes=('FP16', 'BF16', 'FP8')):
-    """检查 dtype 与累加类型是否具备进入候选路径的条件。
+    """Check whether the dtype and accumulation type meet the conditions for entering the candidate path.
 
-    supported_dtypes 应根据待测 GPU 和 kernel 能力配置；这里同时展示
-    理论存储量和路径条件，不代表当前 GPU 已经执行 Tensor Core。
+    supported_dtypes should be configured according to the GPU and kernel capabilities to be tested; this shows
+    both the theoretical storage and the path conditions, and does not mean the current GPU has executed Tensor Core.
     """
     dtype_bytes = {'FP32': 4, 'FP16': 2, 'BF16': 2, 'FP8': 1}
     if numel <= 0:
@@ -123,13 +123,13 @@ else:
     raise AssertionError('numel 为 0 时应报错')
 ```
 
-## Q3：为什么满足候选条件后，Tensor Core 利用率仍不能跑满？
+## Q3: Why can Tensor Core utilization still not be saturated after the candidate conditions are met?
 
 
-Tensor Core 的利用率受三个层面约束：
-- **tile 是否对齐**：shape 不合适时，硬件难以把工作完整打包；
-- **layout 是否连续**：布局不连续会让打包前后的访存变碎；
-- **register / occupancy 是否允许**：临时变量太多时，算力单元未必能持续喂满。
+Tensor Core utilization is constrained at three levels:
+- **Whether the tile is aligned**: when the shape is unsuitable, the hardware struggles to pack the work completely;
+- **Whether the layout is contiguous**: a non-contiguous layout fragments the memory accesses before and after packing;
+- **Whether registers / occupancy allow it**: with too many temporary variables, the compute units may not be continuously fed to capacity.
 
 ```mermaid
 flowchart TD
@@ -140,18 +140,18 @@ flowchart TD
     Occ[Occupancy] --> Util
 ```
 
-因此，Tensor Core 利用率不是“用了就有”，而是要看输入尺寸、布局、同步方式和临时变量是否都允许它进入高吞吐路径。
+Therefore, Tensor Core utilization is not "used means achieved"; it depends on whether the input size, layout, synchronization method, and temporary variables all allow it to enter the high-throughput path.
 
-### Q3小验证：对齐和打包为什么重要
+### Q3 Mini Check: Why alignment and packing matter
 
-适合的 shape 更容易进入高吞吐路径。
+A suitable shape enters the high-throughput path more easily.
 
 ```python
 def tensorcore_utilization_factors(m, n, k, tile=16, layout_contiguous=True, occupancy=1.0, register_pressure=32, register_budget=64):
-    """整理 shape、layout、occupancy 和寄存器压力的候选条件。
+    """Organize the candidate conditions of shape, layout, occupancy, and register pressure.
 
-    occupancy 和 register_budget 是教学输入，不是某一 GPU 的通用阈值；
-    实际利用率仍需由 profiler 或固定 workload benchmark 验证。
+    occupancy and register_budget are teaching inputs, not universal thresholds of a certain GPU;
+    actual utilization still needs to be verified by a profiler or a fixed-workload benchmark.
     """
     if min(m, n, k, tile, register_pressure, register_budget) <= 0:
         raise ValueError('矩阵维度、tile 和寄存器参数必须为正数')
@@ -171,23 +171,23 @@ assert tensorcore_utilization_factors(128, 128, 128)['path_candidate']
 assert not tensorcore_utilization_factors(128, 128, 128, occupancy=0.3)['path_candidate']
 ```
 
-## Q4：如何用 profiler 或 benchmark 证明一次计算真的用上了 Tensor Core？
+## Q4: How do you use a profiler or benchmark to prove that a computation really used the Tensor Core?
 
 
-Q2 和 Q3 给出的只是进入高吞吐路径的候选条件，不能替代实测证据。验证一次计算是否真的使用 Tensor Core，需要在固定 model、dtype、shape、warmup 和重复次数下观察 kernel 名称、CUDA 时间线和吞吐变化。
+Q2 and Q3 only give the candidate conditions for entering the high-throughput path and cannot replace measured evidence. To verify whether a computation really uses the Tensor Core, observe the kernel name, CUDA timeline, and throughput change under a fixed model, dtype, shape, warmup, and repeat count.
 
-PyTorch 的 `matmul` 或 `linear` 通常会进入 cuBLAS 等 GEMM kernel，最终是否使用 Tensor Core，不能只看 Python 代码或 dtype。下面的代码先汇总 shape、dtype、layout 和复用条件；GPU 验证时还要观察 kernel 名称、Tensor Core / HMMA 指令计数、tensor pipe 利用率、achieved occupancy、memory throughput 和 baseline 吞吐。
+PyTorch's `matmul` or `linear` usually enters a GEMM kernel such as cuBLAS, and whether the Tensor Core is ultimately used cannot be judged only from the Python code or the dtype. The code below first summarizes shape, dtype, layout, and reuse conditions; during GPU verification, also observe the kernel name, Tensor Core / HMMA instruction count, tensor pipe utilization, achieved occupancy, memory throughput, and baseline throughput.
 
-### Q4小验证：候选条件如何交给 GPU 证据验证
+### Q4 Mini Check: How candidate conditions are handed to GPU evidence for verification
 
-先检查候选条件，再记录 profiler 或 benchmark 所需的固定条件；候选通过不等于已经获得真实加速。
+First check the candidate conditions, then record the fixed conditions needed by the profiler or benchmark; a passed candidate does not mean a real speedup has been obtained.
 
 ```python
 def tensorcore_path_candidate(m, n, k, tile=16, dtype_supported=True, layout_contiguous=True, reuse=1, workload='matmul', warmup=2, repeats=5):
-    """检查 Tensor Core 候选路径的必要条件，不估算真实加速比。
+    """Check the necessary conditions of the Tensor Core candidate path; does not estimate the real speedup.
 
-    shape、dtype 和 layout 只是进入候选路径的必要条件；
-    实际 kernel 是否使用 Tensor Core，还要通过 GPU profiler 或 benchmark 确认。
+    shape, dtype, and layout are only necessary conditions for entering the candidate path;
+    whether the actual kernel uses the Tensor Core must also be confirmed by a GPU profiler or benchmark.
     """
     if min(m, n, k, tile, reuse) <= 0 or warmup < 0 or repeats <= 0:
         raise ValueError('矩阵维度、tile、reuse 和 repeats 必须为正数，warmup 不能为负数')
@@ -223,11 +223,11 @@ print('候选路径成立不等于真实 Tensor Core 加速，仍需 GPU 证据'
 ```
 
 ---
-## 相关阅读
+## Related Reading
 
-**导语：** 继续把 Tensor Core 的矩阵路径连接到 CUDA 编程和 Attention 实现。
+**Overview:** Continue by connecting the matrix path of the Tensor Core to CUDA programming and Attention implementation.
 
-- [NVIDIA CUDA C Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/)：查阅线程层级、内存访问和执行模型。
-- [CUTLASS](https://github.com/NVIDIA/cutlass)：观察 GEMM、tile 和 Tensor Core kernel 的工程实现。
-- [14. FlashAttention Memory Model | FlashAttention 显存模型](./14_FlashAttention_Memory_Model.md)
+- [NVIDIA CUDA C Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/): consult the thread hierarchy, memory access, and execution model.
+- [CUTLASS](https://github.com/NVIDIA/cutlass): observe the engineering implementation of GEMM, tiles, and Tensor Core kernels.
+- [14. FlashAttention Memory Model](./14_FlashAttention_Memory_Model.md)
 ---
