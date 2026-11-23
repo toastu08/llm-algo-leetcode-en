@@ -1,8 +1,8 @@
 # PROGRESS.md — English Translation Progress
 
 > **Last updated:** 2026-11-23  
-> **Overall:** 2 / 472 source files translated (0.4%)  
-> **Current focus:** M1 Part 00 — finish 00-P, then continue 00-1
+> **Overall:** 7 / 472 source files translated (1.5%)  
+> **Current focus:** M1 Part 00 — 00-P is complete; continue 00-1 with notebooks 02–10
 
 This file is the single source of truth for translation status. Update it
 after every file and every batch. Do not delete completed rows.
@@ -23,7 +23,7 @@ after every file and every batch. Do not delete completed rows.
 | ID | Milestone | Files | Translated | Reviewed | Blocked | Not started | % |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | M0 | Bootstrap and dry run | 0 | 0 | 0 | 0 | 0 | ✅ |
-| M1 | Part 00 — Prerequisites | 26 | 2 | 0 | 0 | 24 | 7.7% |
+| M1 | Part 00 — Prerequisites | 26 | 7 | 0 | 0 | 19 | 26.9% |
 | M2 | Part 01 — Hardware, Math, and Systems | 41 | 0 | 0 | 0 | 41 | 0% |
 | M3 | Part 02 — PyTorch Algorithms | 136 | 0 | 0 | 0 | 136 | 0% |
 | M4 | Part 03 — Triton Kernels | 26 | 0 | 0 | 0 | 26 | 0% |
@@ -34,7 +34,7 @@ after every file and every batch. Do not delete completed rows.
 | M9 | Docs-only pages | 14 | 0 | 0 | 0 | 14 | 0% |
 | M10 | Ancillary development and environment docs (optional) | 5 | 0 | 0 | 0 | 5 | 0% |
 | M11 | Regeneration and final QA | 0 | 0 | 0 | 0 | 0 | — |
-| **Total** | | **472** | **2** | **0** | **0** | **470** | **0.4%** |
+| **Total** | | **472** | **7** | **0** | **0** | **465** | **1.5%** |
 
 Update the counts as you go. A file counts as “Translated” only when it
 meets the definition of done in `AGENTS.md` §13. “Reviewed” means a second
@@ -42,13 +42,14 @@ agent checked it and confirmed the same criteria.
 
 ## Current focus
 
-**M0 dry run: complete.** The two sample files were translated in place and
-validated.
+**00-P is complete.** `intro.md` and `0A.md`–`0E.md` are translated, and their
+docs mirrors were regenerated with `convert_notebook.py --file` plus
+`sync_docs_navigation.py --part 00_Prerequisites`.
 
 Next focus:
 
-- Finish `00-P` by translating `0A.md`–`0E.md`.
-- Then continue `00-1` with notebooks 02–10 (`01` is already done).
+- Continue `00-1` with notebooks 02–10 (`01` is already done).
+- Then translate batch `00-2` (notebooks 11–20).
 
 ### M0 dry-run notes
 
@@ -76,11 +77,11 @@ notes. Append `· reviewed`, `· blocked: reason`, or a short note as needed.
 #### 00-P — Prose and navigation (6 files, 2,705 CJK)
 
 - [x] `00_Prerequisites/intro.md`
-- [ ] `00_Prerequisites/0A.md`
-- [ ] `00_Prerequisites/0B.md`
-- [ ] `00_Prerequisites/0C.md`
-- [ ] `00_Prerequisites/0D.md`
-- [ ] `00_Prerequisites/0E.md`
+- [x] `00_Prerequisites/0A.md`
+- [x] `00_Prerequisites/0B.md`
+- [x] `00_Prerequisites/0C.md`
+- [x] `00_Prerequisites/0D.md`
+- [x] `00_Prerequisites/0E.md`
 
 #### 00-1 — Notebooks 01–10 (10 files, 8,690 CJK)
 
@@ -703,6 +704,7 @@ notes. Append `· reviewed`, `· blocked: reason`, or a short note as needed.
 | Date | Agent | Milestone / batch | Files touched | Validation run | Notes |
 | --- | --- | --- | ---: | --- | --- |
 | 2026-11-23 | OpenCode | M0 dry run (M1 `00-P`/`00-1`) | 2 | JSON/schema, AST, residual-CJK, structure | Conventions confirmed; code print/assert strings left Chinese per policy |
+| 2026-11-23 | OpenCode | M1 `00-P` (0A–0E) | 5 | Structure diff, residual-CJK, mirror check, chapter links | Zero residual CJK; heading/table/link counts match baseline; mirrors rebuilt for the six `00-P` pages |
 
 ## Roadblocks and quirks
 
@@ -741,7 +743,10 @@ Add new terms discovered during translation. Later, merge them into
 
 | Chinese | English / abbreviation | Where first seen | Notes |
 | --- | --- | --- | --- |
-| — | — | — | — |
+| 显存账本 | memory ledger | `00_Prerequisites/0E.md`, `18_Memory_Profiling_and_Optimization` | Matches the `Unified_Training_Memory_Ledger` naming in Part 02 |
+| 对象驻留 | object residency | `00_Prerequisites/0E.md` | Lifecycle of objects that stay resident in memory |
+| 复测 | re-measurement | `00_Prerequisites/0E.md` | Re-running a measurement to confirm a change or regression |
+| 上游梯度 | upstream gradient | `00_Prerequisites/0B.md` | Already in `docs/terminology.md`; used consistently |
 
 ## Content issues
 

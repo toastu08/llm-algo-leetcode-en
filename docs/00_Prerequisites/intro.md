@@ -1,36 +1,36 @@
-# 第零部分：Python、PyTorch 与实验基础
+# Part 00: Python, PyTorch, and Experimental Foundations
 
-## Part 概览
+## Part Overview
 
-模型代码中的形状错误、梯度中断、状态遗漏和计时偏差，往往来自基础接口没有对齐。Part 00 从数据与函数开始，逐步学习张量、模型对象、训练更新和模型组件，并用小规模 CPU 示例检查结果。
+Shape errors, interrupted gradients, missing state, and timing bias in model code often come from misaligned foundational interfaces. Part 00 starts with data and functions, then gradually covers tensors, model objects, training updates, and model components, using small CPU examples to check the results.
 
-## 学习路线
+## Learning Path
 
-初学者按 0A → 0B → 0C → 0D 阅读；熟悉 Python 和 NumPy 时可从 0B 开始。运行出错、需要测量时间或准备比较改动时，随时进入 0E，无需等其余组全部读完。图中实线表示主学习顺序，虚线表示按问题进入诊断与测量。
+Beginners should read 0A → 0B → 0C → 0D; if you are familiar with Python and NumPy, you can start from 0B. When a run fails, you need to measure time, or you are preparing to compare changes, go to 0E at any time; you do not need to finish all the other groups first. Solid lines in the figure indicate the main learning order; dashed lines indicate entering diagnosis and measurement based on a problem.
 
-![Part 00 学习路线与诊断入口](../public/00_Prerequisites/part00_learning_route.svg)
+![Part 00 learning path and diagnostic entry points](../public/00_Prerequisites/part00_learning_route.svg)
 
-## 五组入口
+## Five Group Entry Points
 
-| 学习组 | 遇到的问题 | 完成后能检查什么 |
+| Learning group | Problem it addresses | What you can check after completing it |
 |:---|:---|:---|
-| [0A Python、NumPy 与工程入口](./0A.md) | 数据如何组织，数组维度如何表达，配置与文件怎样管理？ | 函数输入、形状变换、对象状态和运行路径 |
-| [0B PyTorch 张量与自动求导](./0B.md) | 张量是否共享存储，维度怎样变化，梯度从哪里来？ | 张量布局、索引结果、反向梯度与梯度模式 |
-| [0C 模型与训练生命周期](./0C.md) | 哪些状态被注册、保存和更新，训练与验证怎样连接？ | 模型状态、恢复续跑、参数更新与评价指标 |
-| [0D Transformer Block 与模型组件](./0D.md) | Attention、激活和归一化怎样更新同一条隐状态？ | 分支增量、组件输出、局部梯度与多头形状 |
-| [0E 运行诊断与实验基础](./0E.md) | 运行是否有效，时间和容量怎样测量与比较？ | 首个失败点、计时样本、容量估算和实验条件 |
+| [0A Python, NumPy, and Engineering Entry](./0A.md) | How is data organized, how are array dimensions expressed, and how are configuration and files managed? | Function inputs, shape transformations, object state, and runtime paths |
+| [0B PyTorch Tensors and Autograd](./0B.md) | Do tensors share storage, how do dimensions change, and where do gradients come from? | Tensor layout, indexing results, backward gradients, and gradient modes |
+| [0C Models and the Training Lifecycle](./0C.md) | Which state is registered, saved, and updated, and how are training and validation connected? | Model state, resume-from-checkpoint, parameter updates, and evaluation metrics |
+| [0D Transformer Block and Model Components](./0D.md) | How do attention, activations, and normalization update the same hidden state? | Branch increments, component outputs, local gradients, and multi-head shapes |
+| [0E Runtime Diagnosis and Experimental Foundations](./0E.md) | Is a run valid, and how are time and capacity measured and compared? | First failure point, timing samples, capacity estimates, and experimental conditions |
 
-## 后续衔接
+## Next Steps
 
-根据已经掌握的代码对象选择后续入口：Part 01 解释资源与执行条件，机制页和专题进一步展开具体方法。
+Choose the next entry point based on the code objects you have already mastered: Part 01 explains resources and execution conditions, while mechanism pages and topic discussions further expand specific methods.
 
-| 接下来要解决的问题 | 优先入口 |
+| Problem to solve next | Preferred entry point |
 |:---|:---|
-| 理解梯度、损失归约和有效参数更新 | [反向传播与训练机制](../topic_discussion/backpropagation_training_mechanism/intro.md) |
-| 理解模型组件怎样组合与演进 | [Part 02 模型组件](../02_PyTorch_Algorithms/2_1.md)、[大模型架构演进](../topic_discussion/llm_architecture_evolution/intro.md) |
-| 从时间、容量现象定位性能问题 | [性能分析](../topic_discussion/performance_analysis/intro.md) |
-| 估算规模、访存和通信，或开始编写计算内核 | [Part 01 硬件、数学与系统](../01_Hardware_Math_and_Systems/intro.md) |
+| Understand gradients, loss reduction, and effective parameter updates | [Backpropagation and Training Mechanics](../topic_discussion/backpropagation_training_mechanism/intro.md) |
+| Understand how model components are combined and evolve | [Part 02 Model Components](../02_PyTorch_Algorithms/2_1.md), [LLM Architecture Evolution](../topic_discussion/llm_architecture_evolution/intro.md) |
+| Locate performance problems from time and capacity symptoms | [Performance Analysis](../topic_discussion/performance_analysis/intro.md) |
+| Estimate scale, memory access, and communication, or start writing compute kernels | [Part 01 Hardware, Math, and Systems](../01_Hardware_Math_and_Systems/intro.md) |
 
-## 环境说明
+## Environment
 
-使用 [`BASE-CPU`](../guide.md#base-cpu) 运行本部分的参考代码与验证。后续 GPU、编译工具链或多卡实验，按目标页面的环境说明准备。
+Use [`BASE-CPU`](../guide.md#base-cpu) to run this part's reference code and verification. For later GPU, compiler toolchain, or multi-GPU experiments, prepare the environment according to the environment notes on the target page.
