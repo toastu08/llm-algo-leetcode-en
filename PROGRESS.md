@@ -1,8 +1,8 @@
 # PROGRESS.md — English Translation Progress
 
 > **Last updated:** 2026-11-23  
-> **Overall:** 7 / 472 source files translated (1.5%)  
-> **Current focus:** M1 Part 00 — 00-P is complete; continue 00-1 with notebooks 02–10
+> **Overall:** 16 / 472 source files translated (3.4%)  
+> **Current focus:** M1 Part 00 — `00-P` and `00-1` are complete; next is `00-2` (notebooks 11–20)
 
 This file is the single source of truth for translation status. Update it
 after every file and every batch. Do not delete completed rows.
@@ -23,7 +23,7 @@ after every file and every batch. Do not delete completed rows.
 | ID | Milestone | Files | Translated | Reviewed | Blocked | Not started | % |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | M0 | Bootstrap and dry run | 0 | 0 | 0 | 0 | 0 | ✅ |
-| M1 | Part 00 — Prerequisites | 26 | 7 | 0 | 0 | 19 | 26.9% |
+| M1 | Part 00 — Prerequisites | 26 | 16 | 0 | 0 | 10 | 61.5% |
 | M2 | Part 01 — Hardware, Math, and Systems | 41 | 0 | 0 | 0 | 41 | 0% |
 | M3 | Part 02 — PyTorch Algorithms | 136 | 0 | 0 | 0 | 136 | 0% |
 | M4 | Part 03 — Triton Kernels | 26 | 0 | 0 | 0 | 26 | 0% |
@@ -34,7 +34,7 @@ after every file and every batch. Do not delete completed rows.
 | M9 | Docs-only pages | 14 | 0 | 0 | 0 | 14 | 0% |
 | M10 | Ancillary development and environment docs (optional) | 5 | 0 | 0 | 0 | 5 | 0% |
 | M11 | Regeneration and final QA | 0 | 0 | 0 | 0 | 0 | — |
-| **Total** | | **472** | **7** | **0** | **0** | **465** | **1.5%** |
+| **Total** | | **472** | **16** | **0** | **0** | **456** | **3.4%** |
 
 Update the counts as you go. A file counts as “Translated” only when it
 meets the definition of done in `AGENTS.md` §13. “Reviewed” means a second
@@ -42,14 +42,16 @@ agent checked it and confirmed the same criteria.
 
 ## Current focus
 
-**00-P is complete.** `intro.md` and `0A.md`–`0E.md` are translated, and their
-docs mirrors were regenerated with `convert_notebook.py --file` plus
-`sync_docs_navigation.py --part 00_Prerequisites`.
+**`00-P` and `00-1` are complete.** The prose pages and notebooks 01–10 are
+translated, and their docs mirrors were regenerated with
+`convert_notebook.py --file` (plus `sync_docs_navigation.py --part` for the
+prose pages).
 
 Next focus:
 
-- Continue `00-1` with notebooks 02–10 (`01` is already done).
-- Then translate batch `00-2` (notebooks 11–20).
+- Translate batch `00-2` (notebooks 11–20).
+- Then run the Part 00 batch checks, rebuild the remaining Part 00 mirrors, and
+  close M1.
 
 ### M0 dry-run notes
 
@@ -86,15 +88,15 @@ notes. Append `· reviewed`, `· blocked: reason`, or a short note as needed.
 #### 00-1 — Notebooks 01–10 (10 files, 8,690 CJK)
 
 - [x] `00_Prerequisites/01_Python_Essentials_for_LLM.ipynb`
-- [ ] `00_Prerequisites/02_NumPy_and_Einsum.ipynb`
-- [ ] `00_Prerequisites/03_Python_OOP_and_Utility_Patterns.ipynb`
-- [ ] `00_Prerequisites/04_Python_Config_and_Data_Entry.ipynb`
-- [ ] `00_Prerequisites/05_PyTorch_Tensor_Fundamentals.ipynb`
-- [ ] `00_Prerequisites/06_PyTorch_Tensor_Layout_and_Indexing.ipynb`
-- [ ] `00_Prerequisites/07_PyTorch_Autograd_and_Backward.ipynb`
-- [ ] `00_Prerequisites/08_PyTorch_Grad_Hygiene_and_No_Grad.ipynb`
-- [ ] `00_Prerequisites/09_PyTorch_nn_Module_Basics.ipynb`
-- [ ] `00_Prerequisites/10_PyTorch_State_dict_and_Persistence.ipynb`
+- [x] `00_Prerequisites/02_NumPy_and_Einsum.ipynb`
+- [x] `00_Prerequisites/03_Python_OOP_and_Utility_Patterns.ipynb`
+- [x] `00_Prerequisites/04_Python_Config_and_Data_Entry.ipynb`
+- [x] `00_Prerequisites/05_PyTorch_Tensor_Fundamentals.ipynb`
+- [x] `00_Prerequisites/06_PyTorch_Tensor_Layout_and_Indexing.ipynb`
+- [x] `00_Prerequisites/07_PyTorch_Autograd_and_Backward.ipynb`
+- [x] `00_Prerequisites/08_PyTorch_Grad_Hygiene_and_No_Grad.ipynb`
+- [x] `00_Prerequisites/09_PyTorch_nn_Module_Basics.ipynb`
+- [x] `00_Prerequisites/10_PyTorch_State_dict_and_Persistence.ipynb`
 
 #### 00-2 — Notebooks 11–20 (10 files, 13,508 CJK)
 
@@ -705,6 +707,7 @@ notes. Append `· reviewed`, `· blocked: reason`, or a short note as needed.
 | --- | --- | --- | ---: | --- | --- |
 | 2026-11-23 | OpenCode | M0 dry run (M1 `00-P`/`00-1`) | 2 | JSON/schema, AST, residual-CJK, structure | Conventions confirmed; code print/assert strings left Chinese per policy |
 | 2026-11-23 | OpenCode | M1 `00-P` (0A–0E) | 5 | Structure diff, residual-CJK, mirror check, chapter links | Zero residual CJK; heading/table/link counts match baseline; mirrors rebuilt for the six `00-P` pages |
+| 2026-11-23 | OpenCode | M1 `00-1` (02–10) | 9 | Structure diff, AST (docstrings normalized), cell metadata/outputs, residual-CJK scan, mirror check, chapter links | 0 CJK in markdown prose and 0 in code comments/docstrings; the 56 remaining markdown CJK characters are the required numbered H1 subtitles; no notebook outputs changed; mirrors rebuilt for the nine notebooks |
 
 ## Roadblocks and quirks
 
@@ -747,6 +750,8 @@ Add new terms discovered during translation. Later, merge them into
 | 对象驻留 | object residency | `00_Prerequisites/0E.md` | Lifecycle of objects that stay resident in memory |
 | 复测 | re-measurement | `00_Prerequisites/0E.md` | Re-running a measurement to confirm a change or regression |
 | 上游梯度 | upstream gradient | `00_Prerequisites/0B.md` | Already in `docs/terminology.md`; used consistently |
+| 梯度边界 | gradient boundary | `00_Prerequisites/08_PyTorch_Grad_Hygiene_and_No_Grad` | Distinguishes `train/eval`, `no_grad`, `detach`, and `requires_grad` |
+| 保序 / 内容守恒 | content conservation | `00_Prerequisites/06_PyTorch_Tensor_Layout_and_Indexing` | Used for reshape/index checks preserving elements |
 
 ## Content issues
 

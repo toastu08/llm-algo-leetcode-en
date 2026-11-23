@@ -1,6 +1,6 @@
 # 07. PyTorch Autograd and Backward | PyTorch 自动求导与反向传播
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `PyTorch`, `自动求导`, `反向传播` | **目标人群：** 准备学习训练循环、反向状态或显存机制的学习者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `PyTorch`, `autograd`, `backward propagation` | **Audience:** learners preparing to study the training loop, backward state, or memory mechanisms
 
 > 🚀 **云端运行环境**
 >
@@ -10,24 +10,24 @@
 > [![Open In Studio](https://img.shields.io/badge/Open%20In-ModelScope-blueviolet?logo=alibabacloud)](https://modelscope.cn/my/mynotebook) *(国内推荐：魔搭社区免费实例)*
 
 
-## 本节导读
+## Section Guide
 
-前向传播把张量与算子连接成计算依赖，反向传播沿这些依赖把上游梯度传回参数。非标量输出、分支、残差和共享参数会改变梯度的传递与汇合方式。
+The forward pass connects tensors and operators into computational dependencies, and the backward pass sends upstream gradients back to the parameters along these dependencies. Non-scalar outputs, branches, residuals, and shared parameters change how gradients flow and merge.
 
-完成本节后，你应能解释向量—雅可比积、反向保存状态和梯度累积，并判断一条梯度路径为何存在、汇合或中断。
+After completing this section, you should be able to explain the vector-Jacobian product, the state saved for backward, and gradient accumulation, and determine why a gradient path exists, merges, or is interrupted.
 
-**关键词：** `requires_grad`, `backward()`, `VJP`, `saved_tensors`
+**Keywords:** `requires_grad`, `backward()`, `VJP`, `saved_tensors`
 
-![本节概念关系](../public/00_Prerequisites/07_autograd_backward_map.svg)
+![Concept relationships in this section](../public/00_Prerequisites/07_autograd_backward_map.svg)
 
-## 前置阅读
-**导语：** 先理解张量的形状、布局与索引，再把注意力转向计算依赖和梯度流。
-- [06. PyTorch Tensor Layout and Indexing | PyTorch 张量布局与索引](./06_PyTorch_Tensor_Layout_and_Indexing.md)
-- [0B 组页](./0B.md)
+## Prerequisite Reading
+**Overview:** First understand tensor shape, layout, and indexing, then turn your attention to computational dependencies and gradient flow.
+- [06. PyTorch Tensor Layout and Indexing](./06_PyTorch_Tensor_Layout_and_Indexing.md)
+- [0B Group Page](./0B.md)
 
-## Q1：自动求导如何沿计算图回传标量梯度？
+## Q1: How does autograd send a scalar gradient back along the computation graph?
 
-带 `requires_grad=True` 的叶子张量参与运算后，结果会记录 `grad_fn`。标量结果调用 `backward()` 时，PyTorch 从上游梯度 1 开始应用链式法则，并把结果累积到叶子张量的 `.grad`。
+After a leaf tensor with `requires_grad=True` participates in operations, the result records a `grad_fn`. When `backward()` is called on a scalar result, PyTorch starts from the upstream gradient 1, applies the chain rule, and accumulates the result into the leaf tensor's `.grad`.
 
 ```python
 import torch
@@ -40,7 +40,7 @@ y.backward()
 print('x.grad:', x.grad.item())
 ```
 
-## Q1 验证：解析梯度与累积行为是否正确？
+## Q1 verification: Are the analytic gradient and the accumulation behavior correct?
 
 ```python
 x = torch.tensor(2.0, requires_grad=True)
@@ -53,9 +53,9 @@ assert x.grad.item() == 0.0
 print('✅ 标量反向传播与梯度累积通过')
 ```
 
-## Q2：叶子张量、`grad_fn` 与 `retain_grad()` 分别说明什么？
+## Q2: What do leaf tensors, `grad_fn`, and `retain_grad()` each describe?
 
-叶子张量是梯度最终写入的位置；运算生成的非叶子张量通过 `grad_fn` 记录来源，但默认不保留 `.grad`。调试中间梯度时可以调用 `retain_grad()`，这不会改变求导公式，只增加一份可观察状态。
+A leaf tensor is where the gradient is ultimately written; a non-leaf tensor produced by an operation records its source through `grad_fn` but does not keep `.grad` by default. When debugging intermediate gradients, you can call `retain_grad()`, which does not change the differentiation formula and only adds an observable state.
 
 ```python
 leaf = torch.tensor(2.0, requires_grad=True)
@@ -73,7 +73,7 @@ print({
 })
 ```
 
-## Q2 验证：叶子和中间结果的梯度是否符合链式法则？
+## Q2 verification: Do the gradients of the leaf and the intermediate result follow the chain rule?
 
 ```python
 leaf = torch.tensor(2.0, requires_grad=True)
@@ -86,9 +86,9 @@ assert intermediate.grad.item() == 12.0
 print('✅ 叶子张量、grad_fn 与 retain_grad 通过')
 ```
 
-## Q3：非标量输出为什么需要显式上游梯度？
+## Q3: Why does a non-scalar output need an explicit upstream gradient?
 
-向量输出没有唯一的“对所有元素求导”结果。`backward(gradient)` 实际计算向量—雅可比积：给定上游向量 `v`，返回 `vᵀJ`。不同上游梯度代表后续计算对各输出位置赋予了不同权重。
+A vector output has no unique "derivative with respect to all elements" result. `backward(gradient)` actually computes a vector-Jacobian product: given an upstream vector `v`, it returns `vᵀJ`. Different upstream gradients mean that the downstream computation assigns different weights to each output position.
 
 ```python
 x = torch.tensor([2.0, 3.0], requires_grad=True)
@@ -101,7 +101,7 @@ print('upstream:', upstream.tolist())
 print('vjp:', x.grad.tolist())
 ```
 
-## Q3 验证：VJP 是否等于上游梯度乘局部导数？
+## Q3 verification: Does the VJP equal the upstream gradient multiplied by the local derivative?
 
 ```python
 x = torch.tensor([2.0, 3.0], requires_grad=True)
@@ -119,22 +119,22 @@ else:
 print('✅ 向量—雅可比积通过')
 ```
 
-## Q4：反向传播为什么需要保存前向张量？
+## Q4: Why does backward propagation need to save forward tensors?
 
-某些局部导数依赖前向输入或输出，因此自动求导会保存反向传播所需张量，并在反向阶段读取。`saved_tensors_hooks` 可以观察这条保存—读取链；它说明的是反向依赖，不等同于中间张量的 `.grad`。保存对象的数量和生命周期会进一步影响训练内存。
+Some local derivatives depend on the forward input or output, so autograd saves the tensors needed for backward propagation and reads them during the backward stage. `saved_tensors_hooks` can observe this save-read chain; it illustrates the backward dependency and is not the same as an intermediate tensor's `.grad`. The number and lifetime of saved objects further affect training memory.
 
 ```python
 events = []
 
 
 def pack_hook(tensor):
-    """记录前向传播保存的张量形状，并原样返回保存对象。"""
+    """Record the shape of a tensor saved by the forward pass and return the saved object unchanged."""
     events.append(('save', tuple(tensor.shape)))
     return tensor
 
 
 def unpack_hook(tensor):
-    """记录反向传播读取的张量形状，并恢复保存对象。"""
+    """Record the shape of a tensor read by the backward pass and restore the saved object."""
     events.append(('load', tuple(tensor.shape)))
     return tensor
 
@@ -147,7 +147,7 @@ with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
 print('saved tensor events:', events)
 ```
 
-## Q4 验证：保存与读取是否分别出现在前向传播和反向传播阶段？
+## Q4 verification: Do saving and reading occur in the forward and backward stages respectively?
 
 ```python
 events = []
@@ -162,16 +162,16 @@ assert torch.allclose(x.grad, torch.tensor([4.0, 6.0]))
 print('✅ 反向保存张量的生命周期通过')
 ```
 
-## Q5：自定义 `Function` 如何闭合前向与反向契约？
+## Q5: How does a custom `Function` close the forward-backward contract?
 
-自定义 `Function` 的 `forward()` 计算输出，并用 `ctx.save_for_backward()` 保存局部导数所需状态；`backward()` 读取这些状态，将上游梯度乘以局部导数后返回输入梯度。返回梯度的数量必须与需要求导的输入对应。
+The custom `Function`'s `forward()` computes the output and uses `ctx.save_for_backward()` to save the state needed for the local derivative; `backward()` reads this state, multiplies the upstream gradient by the local derivative, and returns the input gradient. The number of returned gradients must correspond to the inputs that require gradients.
 
 ```python
 from torch.autograd import Function
 
 
 class Square(Function):
-    """演示前向保存状态与反向消费上游梯度的最小 Function。"""
+    """A minimal Function that demonstrates saving state in forward and consuming the upstream gradient in backward."""
 
     @staticmethod
     def forward(ctx, x):
@@ -189,7 +189,7 @@ Square.apply(x).backward()
 print('custom gradient:', x.grad.item())
 ```
 
-## Q5 验证：自定义梯度是否通过解析值与 gradcheck？
+## Q5 verification: Does the custom gradient pass the analytic value and gradcheck?
 
 ```python
 x = torch.tensor(3.0, requires_grad=True)
@@ -201,16 +201,16 @@ assert torch.autograd.gradcheck(Square.apply, (gradcheck_input,))
 print('✅ 自定义 autograd 通过')
 ```
 
-## Q6：分支、残差与共享参数的梯度如何汇合？
+## Q6: How do the gradients of branches, residuals, and shared parameters merge?
 
-一条张量被多个分支使用时，反向传播会把各分支返回的梯度相加。残差连接 `main + x` 为 `x` 提供一条局部导数为 1 的恒等路径；共享参数同时参与主分支和正则分支时，两条路径的贡献都会累积到参数的 `.grad`。这里要区分三类量：上游梯度是某个节点收到的反向输入，中间张量的梯度需要 `retain_grad()` 才会保留，叶子参数的 `.grad` 则是所有可达分支贡献的累积结果。
+When a tensor is used by multiple branches, backward propagation adds the gradients returned by each branch. The residual connection `main + x` provides an identity path with local derivative 1 for `x`; when a shared parameter participates in both the main branch and the regularization branch, the contributions of both paths accumulate into the parameter's `.grad`. Three kinds of quantities need to be distinguished here: the upstream gradient is the backward input received by a node, an intermediate tensor's gradient is only kept if `retain_grad()` is called, and a leaf parameter's `.grad` is the accumulated result of the contributions of all reachable branches.
 
 ```python
 x = torch.tensor(2.0, requires_grad=True)
 shared_weight = torch.tensor(3.0, requires_grad=True)
 
 main = shared_weight * x
-merged = main + x  # 残差恒等路径
+merged = main + x  # residual identity path
 merged.retain_grad()
 main_loss = merged.square()
 regularization_loss = shared_weight.square()
@@ -224,7 +224,7 @@ print({
 })
 ```
 
-## Q6 验证：恒等路径和共享参数的分支贡献是否正确相加？
+## Q6 verification: Are the identity path and the branch contributions of the shared parameter added correctly?
 
 ```python
 upstream_to_merged = 2 * merged.detach()
@@ -241,15 +241,15 @@ assert torch.allclose(
 print('✅ 残差恒等路径与共享参数的梯度汇合通过')
 ```
 
-### 本节小结
+### Section Summary
 
-- 标量 `backward()` 从上游梯度 1 开始，非标量输出需要显式上游梯度。
-- `retain_grad()` 保存中间梯度；反向保存张量保存局部反向公式需要的前向状态，二者职责不同。
-- 自定义 `Function` 必须让前向保存的信息、反向传播的输入输出和梯度数量形成闭环。
-- 分支会在反向阶段汇合梯度；残差恒等路径和共享参数都会改变最终累积到 `.grad` 的贡献。
+- Scalar `backward()` starts from the upstream gradient 1, and non-scalar outputs need an explicit upstream gradient.
+- `retain_grad()` keeps intermediate gradients; saved-for-backward tensors save the forward state required by the local backward formula, and the two have different responsibilities.
+- A custom `Function` must close the loop between the information saved in forward, the inputs and outputs of backward, and the number of gradients.
+- Branches merge gradients during the backward stage; the residual identity path and shared parameters both change the contribution finally accumulated into `.grad`.
 
-## 相关阅读
-**导语：** 继续学习训练循环中的梯度边界，并把反向保存张量连接到训练状态和显存账本。
+## Related Reading
+**Overview:** Continue with gradient boundaries in the training loop, and connect saved-for-backward tensors to training state and the memory ledger.
 - [PyTorch Autograd mechanics](https://pytorch.org/docs/stable/notes/autograd.html)
-- [08. PyTorch Grad Hygiene and No-Grad | PyTorch 梯度习惯与无梯度模式](./08_PyTorch_Grad_Hygiene_and_No_Grad.md)
-- [反向传播与训练机制](../topic_discussion/backpropagation_training_mechanism/intro.md)
+- [08. PyTorch Grad Hygiene and No-Grad](./08_PyTorch_Grad_Hygiene_and_No_Grad.md)
+- [Backpropagation and Training Mechanics](../topic_discussion/backpropagation_training_mechanism/intro.md)

@@ -1,6 +1,6 @@
 # 05. PyTorch Tensor Fundamentals | PyTorch 张量基础操作
 
-**难度：** Easy | **环境：** CPU-first | **标签：** `PyTorch`, `Tensor`, `dtype`, `device` | **目标人群：** 从 NumPy 进入 PyTorch 的学习者
+**Difficulty:** Easy | **Environment:** CPU-first | **Tags:** `PyTorch`, `Tensor`, `dtype`, `device` | **Audience:** learners moving from NumPy to PyTorch
 
 > 🚀 **云端运行环境**
 >
@@ -10,24 +10,24 @@
 > [![Open In Studio](https://img.shields.io/badge/Open%20In-ModelScope-blueviolet?logo=alibabacloud)](https://modelscope.cn/my/mynotebook) *(国内推荐：魔搭社区免费实例)*
 
 
-## 本节导读
+## Section Guide
 
-张量在数组之上增加了数据类型、设备、梯度和存储语义。形状相同的张量，仍可能因为数据类型、设备或共享关系不同而产生不同结果。
+On top of arrays, tensors add data type, device, gradient, and storage semantics. Tensors with the same shape may still produce different results because of different data types, devices, or sharing relationships.
 
-完成本节后，你应能读取张量的基本契约，区分复制与共享存储，并判断数值张量和索引张量是否满足输入要求。
+After completing this section, you should be able to read the basic contract of a tensor, distinguish copying from shared storage, and judge whether numeric tensors and index tensors meet the input requirements.
 
-**关键词：** `tensor`, `dtype`, `device`, `storage sharing`
+**Keywords:** `tensor`, `dtype`, `device`, `storage sharing`
 
-![Tensor 基础概念关系](../public/00_Prerequisites/05_tensor_fundamentals_map.svg)
+![Basic tensor concept relationships](../public/00_Prerequisites/05_tensor_fundamentals_map.svg)
 
-## 前置阅读
-**导语：** 先掌握 NumPy 的 shape 和广播，再观察 Tensor 新增的 dtype、device 与存储语义。
-- [02. NumPy and Einsum | NumPy 与 Einsum](./02_NumPy_and_Einsum.md)
-- [0B 组页](./0B.md)
+## Prerequisite Reading
+**Overview:** First master NumPy shapes and broadcasting, then observe the dtype, device, and storage semantics that tensors add.
+- [02. NumPy and Einsum](./02_NumPy_and_Einsum.md)
+- [0B Group Page](./0B.md)
 
-## Q1：如何读取 Tensor 的 shape、dtype 与 device？
+## Q1: How do you read a tensor's shape, dtype, and device?
 
-shape 描述结构，dtype 描述数值解释和单元素大小，device 描述数据所在计算位置。检查输入时应同时记录这三项，而不是只看打印出的数值。
+shape describes the structure, dtype describes the numeric interpretation and per-element size, and device describes the compute location of the data. When checking inputs, record all three instead of only looking at the printed values.
 
 ```python
 import numpy as np
@@ -35,7 +35,7 @@ import torch
 
 
 def describe_tensor(tensor):
-    """返回 Tensor 的结构、数值类型、设备和单元素字节数。"""
+    """Return the tensor's structure, numeric type, device, and per-element bytes."""
     if not isinstance(tensor, torch.Tensor):
         raise TypeError('expected a torch.Tensor')
     return {
@@ -51,7 +51,7 @@ tensor = torch.tensor([[1, 2], [3, 4]], dtype=torch.float32)
 print(describe_tensor(tensor))
 ```
 
-## Q1 验证：结构与数值属性是否完整？
+## Q1 verification: Are the structural and numeric attributes complete?
 
 ```python
 tensor = torch.tensor([[1, 2], [3, 4]], dtype=torch.float32)
@@ -73,9 +73,9 @@ else:
 print('✅ Tensor 属性通过')
 ```
 
-## Q2：哪些构造方式会共享底层数据？
+## Q2: Which construction methods share the underlying data?
 
-`torch.tensor(array)` 会复制输入；`torch.from_numpy(array)` 与 CPU 上兼容 dtype 的 `torch.as_tensor(array)` 通常共享 NumPy 内存；`clone()` 创建独立 Tensor。是否共享决定修改一侧时另一侧会不会变化，因此转换后不能只检查数值相等。
+`torch.tensor(array)` copies the input; `torch.from_numpy(array)` and `torch.as_tensor(array)` with a compatible dtype on CPU usually share the NumPy memory; `clone()` creates an independent tensor. Whether data is shared determines whether modifying one side changes the other, so after conversion you cannot only check that the values are equal.
 
 ```python
 array = np.array([1.0, 2.0, 3.0], dtype=np.float32)
@@ -94,7 +94,7 @@ print({
 })
 ```
 
-## Q2 验证：共享与复制关系是否符合预期？
+## Q2 verification: Do the sharing and copying relationships match expectations?
 
 ```python
 array = np.array([1.0, 2.0, 3.0], dtype=np.float32)
@@ -111,13 +111,13 @@ assert cloned[1].item() == 2.0
 print('✅ Tensor 复制与共享语义通过')
 ```
 
-## Q3：dtype 或 device 转换什么时候会复用原 Tensor？
+## Q3: When does a dtype or device conversion reuse the original tensor?
 
-`.to()` 在 dtype 和 device 都不变时通常返回原 Tensor；发生类型或设备变化时会创建新存储，`copy=True` 则可以显式要求复制。转换必须保持 shape 和数值语义，真实设备迁移还需要目标运行环境可用。
+`.to()` usually returns the original tensor when both dtype and device are unchanged; when the type or device changes, it creates new storage, and `copy=True` can explicitly request a copy. Conversion must preserve shape and numeric semantics, and a real device migration also requires the target runtime environment to be available.
 
 ```python
 def convert_tensor(tensor, *, dtype=None, device=None, copy=False):
-    """转换 Tensor 的 dtype/device；未变化时允许复用，copy=True 强制复制。"""
+    """Convert a tensor's dtype/device; reuse is allowed when nothing changes, copy=True forces a copy."""
     if not isinstance(tensor, torch.Tensor):
         raise TypeError('expected a torch.Tensor')
     target_dtype = tensor.dtype if dtype is None else dtype
@@ -136,7 +136,7 @@ print({
 })
 ```
 
-## Q3 验证：复用、类型转换和强制复制是否保持各自语义？
+## Q3 verification: Do reuse, type conversion, and forced copying each preserve their semantics?
 
 ```python
 source = torch.tensor([[1.0, 2.0]], dtype=torch.float32)
@@ -159,13 +159,13 @@ else:
 print('✅ dtype/device 转换语义通过')
 ```
 
-## Q4：数值 Tensor 与索引 Tensor 的 dtype/device 契约有什么不同？
+## Q4: How do the dtype/device contracts of numeric tensors and index tensors differ?
 
-浮点 Tensor 参与模型计算；Embedding、查表和位置选择通常要求 `torch.long` 索引。参与同一算子的 Tensor 还要位于兼容 device。入口函数可以显式转换索引 dtype 和 device，但不应静默接受浮点小数索引。
+Floating-point tensors participate in model computation; Embedding, table lookup, and position selection usually require `torch.long` indices. Tensors participating in the same operator must also be on compatible devices. The entry function can explicitly convert the index dtype and device, but should not silently accept floating-point fractional indices.
 
 ```python
 def prepare_indices(indices, *, device):
-    """将整数索引放到目标 device，并统一为 torch.long。"""
+    """Move integer indices to the target device and unify them as torch.long."""
     indices = torch.as_tensor(indices)
     if indices.dtype.is_floating_point or indices.dtype == torch.bool:
         raise TypeError('indices must contain integers')
@@ -179,7 +179,7 @@ print('indices:', indices.dtype, indices.device)
 print('selected shape:', tuple(selected.shape))
 ```
 
-## Q4 验证：索引 dtype、device 与输出 shape 是否正确？
+## Q4 verification: Are the index dtype, device, and output shape correct?
 
 ```python
 table = torch.arange(20, dtype=torch.float32).reshape(5, 4)
@@ -199,16 +199,16 @@ else:
 print('✅ dtype、device 与索引契约通过')
 ```
 
-### 本节小结
+### Section Summary
 
-- shape、dtype、device 和单元素字节数共同描述 Tensor 的基本契约。
-- `torch.tensor`、`from_numpy`、`as_tensor` 与 `clone` 的复制/共享语义不同。
-- `.to()` 在条件不变时可以复用原 Tensor，类型或设备变化会形成新表示。
-- 索引 Tensor 应使用整数 dtype，并与被索引对象位于兼容设备。
-## 相关阅读
+- shape, dtype, device, and per-element bytes together describe the basic contract of a tensor.
+- `torch.tensor`, `from_numpy`, `as_tensor`, and `clone` have different copy/share semantics.
+- `.to()` can reuse the original tensor when the conditions are unchanged; a type or device change produces a new representation.
+- Index tensors should use an integer dtype and be on a device compatible with the object being indexed.
+## Related Reading
 
-掌握张量入口后，继续学习布局、索引和反向传播。
+With the tensor entry point mastered, continue with layout, indexing, and backward propagation.
 
-- [PyTorch Tensor 官方文档](https://pytorch.org/docs/stable/tensors.html)
-- [06. PyTorch Tensor Layout and Indexing | PyTorch 张量布局与索引](./06_PyTorch_Tensor_Layout_and_Indexing.md)
-- [07. PyTorch Autograd and Backward | PyTorch 自动求导与反向传播](./07_PyTorch_Autograd_and_Backward.md)
+- [PyTorch Tensor official documentation](https://pytorch.org/docs/stable/tensors.html)
+- [06. PyTorch Tensor Layout and Indexing](./06_PyTorch_Tensor_Layout_and_Indexing.md)
+- [07. PyTorch Autograd and Backward](./07_PyTorch_Autograd_and_Backward.md)

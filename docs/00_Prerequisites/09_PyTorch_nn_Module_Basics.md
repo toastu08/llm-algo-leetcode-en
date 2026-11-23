@@ -1,6 +1,6 @@
 # 09. PyTorch nn Module Basics | PyTorch nn.Module 基础
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `PyTorch`, `模型封装`, `状态管理` | **目标人群：** 准备阅读模型定义与训练代码的学习者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `PyTorch`, `model encapsulation`, `state management` | **Audience:** learners preparing to read model definitions and training code
 
 > 🚀 **云端运行环境**
 >
@@ -10,24 +10,24 @@
 > [![Open In Studio](https://img.shields.io/badge/Open%20In-ModelScope-blueviolet?logo=alibabacloud)](https://modelscope.cn/my/mynotebook) *(国内推荐：魔搭社区免费实例)*
 
 
-## 本节导读
+## Section Guide
 
-模型模块把参数、缓冲区、子模块、前向计算和运行模式组织成可递归组合的对象。初始化与注册方式决定状态能否参与更新、迁移和保存。
+A model module organizes parameters, buffers, submodules, forward computation, and run mode into an object that can be composed recursively. The way state is initialized and registered determines whether it can participate in updates, migration, and saving.
 
-完成本节后，你应能区分参数、缓冲区和普通属性，检查初始化尺度，并判断冻结状态与模型注册状态是否一致。
+After completing this section, you should be able to distinguish parameters, buffers, and ordinary attributes, check the initialization scale, and determine whether the frozen state is consistent with the model's registration state.
 
-**关键词：** `nn.Module`, `initialization`, `Parameter`, `train/eval`, `requires_grad`
+**Keywords:** `nn.Module`, `initialization`, `Parameter`, `train/eval`, `requires_grad`
 
-![nn.Module 的对象与注册关系](../public/00_Prerequisites/09_module_registry_map.svg)
+![The object and registration relationships of nn.Module](../public/00_Prerequisites/09_module_registry_map.svg)
 
-## 前置阅读
-**导语：** Tensor 与梯度进入模型对象后，参数注册决定优化器能够更新哪些状态。
-- [08. PyTorch Grad Hygiene and No-Grad | PyTorch 梯度习惯与无梯度模式](./08_PyTorch_Grad_Hygiene_and_No_Grad.md)
-- [0C 组页](./0C.md)
+## Prerequisite Reading
+**Overview:** Once tensors and gradients enter a model object, parameter registration determines which state the optimizer can update.
+- [08. PyTorch Grad Hygiene and No-Grad](./08_PyTorch_Grad_Hygiene_and_No_Grad.md)
+- [0C Group Page](./0C.md)
 
-## Q1：如何把层和子模块组织成可调用的 `nn.Module`？
+## Q1: How do you organize layers and submodules into a callable `nn.Module`?
 
-模型不是一组散落函数，而是可调用、可递归组合的对象。`__init__()` 注册参数和子模块，`forward()` 描述数据流，`model(x)` 通过模块调用入口触发前向；模块构造完成后，还需要为参数设置与层规模匹配的初始尺度。
+A model is not a set of scattered functions, but a callable object that can be composed recursively. `__init__()` registers parameters and submodules, `forward()` describes the dataflow, and `model(x)` triggers the forward pass through the module call entry point; after the module is constructed, the parameters also need an initial scale that matches the size of the layer.
 
 
 ```python
@@ -38,31 +38,31 @@ import torch.nn as nn
 class SimpleLinear(nn.Module):
     def __init__(self, in_features, out_features):
         super().__init__()
-        # `Parameter` 会被自动注册进模型参数里。
+        # A `Parameter` is automatically registered as a model parameter.
         self.weight = nn.Parameter(torch.empty(out_features, in_features))
         self.bias = nn.Parameter(torch.zeros(out_features))
         nn.init.xavier_uniform_(self.weight)
 
     def forward(self, x):
-        # `forward()` 定义计算逻辑，真正调用时写 `model(x)`。
+        # `forward()` defines the computation logic; when actually calling, write `model(x)`.
         return x @ self.weight.t() + self.bias
 
 
 class TwoLayerMLP(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim):
         super().__init__()
-        # 子模块会递归参与参数注册和状态管理。
+        # Submodules participate recursively in parameter registration and state management.
         self.fc1 = SimpleLinear(input_dim, hidden_dim)
         self.act = nn.GELU()
         self.fc2 = SimpleLinear(hidden_dim, output_dim)
 
     def forward(self, x):
-        # 典型的模块组合：线性层 -> 激活 -> 线性层。
+        # A typical module composition: linear layer -> activation -> linear layer.
         return self.fc2(self.act(self.fc1(x)))
 
 
 def count_parameters(module):
-    """统计模块及其子模块中已注册参数的总元素数。"""
+    """Count the total number of elements of registered parameters in the module and its submodules."""
     return sum(param.numel() for param in module.parameters())
 
 
@@ -72,9 +72,9 @@ print('named_parameters：', [name for name, _ in model.named_parameters()])
 
 ```
 
-## Q1 验证：参数注册、子模块和前向输出是否正确？
+## Q1 verification: Are parameter registration, submodules, and forward output correct?
 
-这里直接检查两件事：自定义层能不能跑，MLP 的输出 shape 和参数总量是否符合预期。
+Two things are checked directly here: whether the custom layer runs, and whether the MLP's output shape and total parameter count match expectations.
 
 
 ```python
@@ -104,14 +104,14 @@ test_two_layer_mlp()
 
 ```
 
-## Q2：参数初始化为什么需要同时考虑尺度与可复现性？
+## Q2: Why does parameter initialization need to consider both scale and reproducibility?
 
-初始化决定训练开始时信号和梯度的尺度。线性层可根据输入、输出维度设置 Xavier 范围，bias 通常从零开始；固定随机种子则让同一初始化方案可复查。初始化策略仍应结合后续激活函数和残差结构选择。
+Initialization determines the scale of signals and gradients at the start of training. A linear layer can set the Xavier range based on the input and output dimensions, and the bias usually starts at zero; a fixed random seed makes the same initialization scheme reviewable. The initialization strategy should still be chosen together with the downstream activation functions and residual structure.
 
 
 ```python
 def reset_linear_parameters(layer, seed):
-    """按 Xavier uniform 重置 CPU 线性层，并返回初始化尺度摘要。"""
+    """Reset a CPU linear layer with Xavier uniform and return an initialization scale summary."""
     if not isinstance(layer, nn.Linear):
         raise TypeError('layer 必须是 nn.Linear')
     if not isinstance(seed, int) or seed < 0:
@@ -140,9 +140,9 @@ print('初始化摘要：', initialization)
 
 ```
 
-## Q2 验证：随机种子、Xavier 范围和 bias 起点是否正确？
+## Q2 verification: Are the random seed, Xavier range, and bias starting point correct?
 
-相同种子应得到相同参数，不同种子应改变权重；所有权重应位于理论 Xavier 范围内，bias 从零开始。
+The same seed should produce the same parameters, and different seeds should change the weights; all weights should lie within the theoretical Xavier range, and the bias should start at zero.
 
 
 ```python
@@ -156,15 +156,15 @@ print('✅ 参数初始化尺度与可复现性通过')
 
 ```
 
-## Q3：`Parameter`、`buffer` 和普通属性分别会进入哪里？
+## Q3: Where do `Parameter`, `buffer`, and ordinary attributes each go?
 
-阅读一个模块时，先用“是否训练、是否保存、是否随模块迁移”三件事判断对象的归属。参数只有交给优化器且具有梯度时才会更新；缓冲区默认保存，但可用 `persistent=False` 排除。
+When reading a module, first use three questions to determine where an object belongs: "is it trained, is it saved, does it migrate with the module". A parameter is updated only when it is given to the optimizer and has a gradient; a buffer is saved by default but can be excluded with `persistent=False`.
 
-| 对象 | 会被优化器更新 | 进入 `state_dict()` | 随模块迁移 device | 常见用途 |
+| Object | Updated by the optimizer | Enters `state_dict()` | Migrates device with the module | Common use |
 |:---|:---:|:---:|:---:|:---|
-| `Parameter` | 已交给优化器且有梯度时 | 是 | 是 | 权重、偏置 |
-| `buffer` | 否 | 默认保存 | 是 | mask、统计量、固定缩放值 |
-| 普通属性 | 否 | 否 | 否 | 配置、名称、临时标记 |
+| `Parameter` | When given to the optimizer and has a gradient | Yes | Yes | weights, biases |
+| `buffer` | No | Saved by default | Yes | masks, statistics, fixed scale values |
+| Ordinary attribute | No | No | No | configuration, names, temporary flags |
 
 
 ```python
@@ -172,9 +172,9 @@ class ToyModule(nn.Module):
     def __init__(self):
         super().__init__()
         self.weight = nn.Parameter(torch.tensor([1.0]))
-        # `buffer` 常用于 mask、统计量、缓存这类“要保存但不训练”的状态。
+        # A `buffer` is often used for state such as masks, statistics, and caches that "should be saved but not trained".
         self.register_buffer('scale', torch.tensor([2.0]))
-        # 普通属性不会进入 state_dict，也不会随模块自动迁移到其他 device。
+        # An ordinary attribute does not enter state_dict and is not automatically migrated to another device with the module.
         self.name = 'toy'
 
     def forward(self, x):
@@ -188,9 +188,9 @@ print('state_dict keys：', list(m.state_dict().keys()))
 
 ```
 
-## Q3 验证：state_dict 是否同时包含参数和 buffer？
+## Q3 verification: Does state_dict contain both parameters and buffers?
 
-这里确认 `state_dict()` 会包含参数和 buffer，但不会把普通属性当成可保存状态。
+Here it confirms that `state_dict()` includes parameters and buffers, but does not treat ordinary attributes as savable state.
 
 
 ```python
@@ -206,9 +206,9 @@ print('✅ state_dict 结构通过')
 
 ```
 
-## Q4：`train/eval` 与梯度模式分别控制什么？
+## Q4: What do `train/eval` and gradient mode control respectively?
 
-`train()` 与 `eval()` 改变 Dropout、BatchNorm 等模块的运行行为，`torch.no_grad()` 控制是否记录计算图；两者解决不同问题。验证阶段通常同时使用 `model.eval()` 与 `torch.no_grad()`，训练阶段则恢复 `model.train()`。
+`train()` and `eval()` change the run behavior of modules such as Dropout and BatchNorm, and `torch.no_grad()` controls whether the computation graph is recorded; the two solve different problems. The validation stage usually uses `model.eval()` and `torch.no_grad()` together, and the training stage restores `model.train()`.
 
 
 ```python
@@ -218,7 +218,7 @@ class ModeAwareBlock(nn.Module):
         self.dropout = nn.Dropout(p=1.0)
 
     def forward(self, x):
-        # 乘法确保 eval 路径也产生一个新结果，便于单独检查梯度模式。
+        # The multiplication ensures the eval path also produces a new result, so gradient mode can be checked separately.
         return self.dropout(x) * 1.0
 
 
@@ -233,9 +233,9 @@ print('train / eval output：', train_output, eval_output)
 
 ```
 
-## Q4 验证：模块模式与梯度模式是否彼此独立？
+## Q4 verification: Are module mode and gradient mode independent of each other?
 
-训练态的 Dropout 会改变输出；验证态恢复确定性行为，而 `no_grad()` 额外保证验证输出不连接计算图。
+Dropout in training mode changes the output; evaluation mode restores deterministic behavior, and `no_grad()` additionally ensures the evaluation output is not connected to the computation graph.
 
 
 ```python
@@ -248,21 +248,21 @@ print('✅ train/eval 与梯度模式检查通过')
 
 ```
 
-## Q5：冻结参数后，注册状态与可训练状态有什么不同？
+## Q5: After freezing parameters, how does registration state differ from trainable state?
 
-`requires_grad=False` 只关闭该参数的梯度计算，不会把参数移出模块，也不会让它消失在 `state_dict()` 中。构造优化器时应显式筛选可训练参数，避免把“已注册”和“应更新”混为一谈。
+`requires_grad=False` only turns off gradient computation for that parameter; it does not remove the parameter from the module or make it disappear from `state_dict()`. When constructing the optimizer, you should explicitly filter the trainable parameters so that "registered" and "should be updated" are not conflated.
 
-| 检查维度 | 判断入口 | 冻结参数的结果 |
+| Check dimension | Entry point | Result for a frozen parameter |
 |:---|:---|:---|
-| 是否注册 | `named_parameters()` | 仍然存在 |
-| 是否保存 | `state_dict()` | 仍然保存 |
-| 是否计算梯度 | `requires_grad` 与 `.grad` | 关闭，反向后 `.grad` 为 `None` |
-| 是否交给优化器 | `optimizer.param_groups` | 取决于构造优化器时是否筛选 |
+| Is it registered | `named_parameters()` | Still present |
+| Is it saved | `state_dict()` | Still saved |
+| Does it compute gradients | `requires_grad` and `.grad` | Off; `.grad` is `None` after backward |
+| Is it given to the optimizer | `optimizer.param_groups` | Depends on whether it was filtered when constructing the optimizer |
 
 
 ```python
 def split_parameter_roles(module):
-    """按 requires_grad 划分已注册参数，返回名称列表。"""
+    """Split registered parameters by requires_grad and return lists of names."""
     trainable = []
     frozen = []
     for name, parameter in module.named_parameters():
@@ -283,9 +283,9 @@ print('parameter roles：', roles)
 
 ```
 
-## Q5 验证：冻结参数是否仍被保存但不产生梯度？
+## Q5 verification: Are frozen parameters still saved without producing gradients?
 
-冻结后的 `fc1` 仍应出现在参数注册表和 `state_dict()` 中；反向传播后它没有梯度，本例的优化器也只持有 `fc2` 的可训练参数。
+After freezing, `fc1` should still appear in the parameter registry and in `state_dict()`; it has no gradient after backward propagation, and the optimizer in this example also holds only the trainable parameters of `fc2`.
 
 
 ```python
@@ -304,8 +304,8 @@ print('✅ 冻结与可训练参数语义通过')
 
 ```
 
-## 相关阅读
+## Related Reading
 
-模块对象建立后，下一页继续处理状态的序列化、恢复和结构迁移。
+With the module object established, the next page continues with state serialization, restoration, and structural migration.
 
-- [10. PyTorch State, Checkpoint, and Recovery | PyTorch 状态、Checkpoint 与恢复](./10_PyTorch_State_dict_and_Persistence.md)
+- [10. PyTorch State, Checkpoint, and Recovery](./10_PyTorch_State_dict_and_Persistence.md)

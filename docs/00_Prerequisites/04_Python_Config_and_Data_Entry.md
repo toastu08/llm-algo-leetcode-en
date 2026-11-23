@@ -1,6 +1,6 @@
 # 04. Python Config and Data Entry | Python 配置与数据入口
 
-**难度：** Easy | **环境：** CPU-first | **标签：** `Python`, `配置`, `I/O`, `复现` | **目标人群：** Part 2-4 前置补课者
+**Difficulty:** Easy | **Environment:** CPU-first | **Tags:** `Python`, `config`, `I/O`, `reproducibility` | **Audience:** learners preparing for Parts 2–4
 
 > 🚀 **云端运行环境**
 >
@@ -10,24 +10,24 @@
 > [![Open In Studio](https://img.shields.io/badge/Open%20In-ModelScope-blueviolet?logo=alibabacloud)](https://modelscope.cn/my/mynotebook) *(国内推荐：魔搭社区免费实例)*
 
 
-## 本节导读
+## Section Guide
 
-一次运行除了对象内部状态，还包含配置、输入来源、资源路径和输出产物。缺少统一记录时，相同代码也可能因为外部条件不同而无法复现。
+Besides an object's internal state, a run also involves configuration, input sources, resource paths, and output artifacts. Without a unified record, even the same code may fail to reproduce because of different external conditions.
 
-完成本节后，你应能区分内部状态与外部运行条件，并用配置、路径、产物清单和运行身份追踪一次实验。
+After completing this section, you should be able to distinguish internal state from external run conditions, and trace an experiment using configuration, paths, an artifact manifest, and the run identity.
 
-**关键词：** `config`, `path`, `artifact`, `run_id`
+**Keywords:** `config`, `path`, `artifact`, `run_id`
 
-![配置、资源与运行产物](../public/00_Prerequisites/04_config_artifact_manifest_map.svg)
+![Configuration, resources, and run artifacts](../public/00_Prerequisites/04_config_artifact_manifest_map.svg)
 
-## 前置阅读
-**导语：** 先理解函数契约和对象状态，再把它们落到配置、文件和运行产物。
-- [03. Python OOP and Utility Patterns | Python 面向对象与工具模式](./03_Python_OOP_and_Utility_Patterns.md)
-- [0A 组页](./0A.md)
+## Prerequisite Reading
+**Overview:** First understand function contracts and object state, then ground them in configuration, files, and run artifacts.
+- [03. Python OOP and Utility Patterns](./03_Python_OOP_and_Utility_Patterns.md)
+- [0A Group Page](./0A.md)
 
-## Q1：配置覆盖后为什么还要检查 schema？
+## Q1: After overriding configuration, why still check the schema?
 
-覆盖规则决定候选参数，schema 决定它是否具备运行所需字段。合并函数应返回新对象，避免修改基础配置；缺失字段应在进入文件或训练流程前失败。
+The override rules determine the candidate parameters, and the schema determines whether it has the fields needed for a run. The merge function should return a new object to avoid modifying the base configuration; missing fields should fail before entering the file or training workflow.
 
 ```python
 import json
@@ -36,7 +36,7 @@ from tempfile import TemporaryDirectory
 
 
 def merge_and_validate_config(base, overrides, required_fields):
-    """合并配置并检查必需字段，不修改输入字典。"""
+    """Merge configuration and check required fields without modifying the input dicts."""
     merged = {**base, **overrides}
     missing = [field for field in required_fields if field not in merged]
     if missing:
@@ -49,7 +49,7 @@ config = merge_and_validate_config(base, {'batch_size': 8}, ('model', 'precision
 print(config)
 ```
 
-## Q1 验证：覆盖、输入不变和缺失字段是否可检查？
+## Q1 verification: Can overriding, unchanged input, and missing fields be checked?
 
 ```python
 base = {'model': 'TinyLM', 'precision': 'bf16', 'batch_size': 4}
@@ -66,13 +66,13 @@ else:
 print('✅ 配置 schema 通过')
 ```
 
-## Q2：路径和 `with` 怎样管理资源生命周期？
+## Q2: How do paths and `with` manage the resource lifecycle?
 
-路径负责定位文件，`with` 负责资源何时创建和释放。临时目录适合一次性检查：作用域内文件必须可读，退出作用域后目录应被自动清理。
+Paths are responsible for locating files, and `with` is responsible for when resources are created and released. A temporary directory is suitable for one-off checks: files inside the scope must be readable, and the directory should be cleaned up automatically after leaving the scope.
 
 ```python
 def write_json(path, payload):
-    """写入 UTF-8 JSON，并返回读回后的对象。"""
+    """Write UTF-8 JSON and return the object read back."""
     path = Path(path)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
     return json.loads(path.read_text(encoding='utf-8'))
@@ -85,7 +85,7 @@ with TemporaryDirectory() as tmpdir:
     print(config_path, restored)
 ```
 
-## Q2 验证：文件可读且临时目录确实被清理了吗？
+## Q2 verification: Is the file readable and is the temporary directory really cleaned up?
 
 ```python
 with TemporaryDirectory() as tmpdir:
@@ -98,13 +98,13 @@ assert not temporary_root.exists()
 print('✅ 文件与资源生命周期通过')
 ```
 
-## Q3：怎样让输入、缓存、日志和 artifact 路径保持稳定？
+## Q3: How do you keep the input, cache, log, and artifact paths stable?
 
-同一 `run_name` 应映射到确定的目录结构，使训练、验证和复查代码不用重复拼接路径。这里只约定位置，不假设文件已经生成。
+The same `run_name` should map to a deterministic directory structure so that training, validation, and review code do not have to concatenate paths repeatedly. This only fixes the locations and does not assume the files have been generated.
 
 ```python
 def build_run_paths(root, run_name):
-    """由根目录和单段 run_name 生成稳定路径；不创建任何文件。"""
+    """Generate stable paths from the root directory and a single-segment run_name; do not create any files."""
     if (
         not isinstance(run_name, str)
         or not run_name
@@ -128,7 +128,7 @@ paths = build_run_paths('runs', 'tinylm-seed42')
 print({name: str(path) for name, path in paths.items()})
 ```
 
-## Q3 验证：相同运行名是否产生相同路径？
+## Q3 verification: Does the same run name produce the same paths?
 
 ```python
 first = build_run_paths('runs', 'tinylm-seed42')
@@ -147,16 +147,16 @@ for invalid_name in ('', '.', '..', '../escape', 'nested/run', 'nested\\run'):
 print('✅ 运行路径契约通过')
 ```
 
-## Q4：怎样记录一次可复现运行的最小清单？
+## Q4: How do you record the minimal manifest of a reproducible run?
 
-配置说明“怎么运行”，输入来源说明“处理什么”，artifact 指向“产出了什么”。`run_id` 由配置、随机种子和输入来源生成，使相同条件可以复算同一身份；artifact 路径作为输出位置单独记录。
+The configuration states "how to run", the input source states "what is processed", and the artifact points to "what was produced". The `run_id` is generated from the configuration, the random seed, and the input source, so the same conditions can recompute the same identity; the artifact path is recorded separately as the output location.
 
 ```python
 import hashlib
 
 
 def build_run_manifest(config, seed, input_source, artifact_path):
-    """生成最小运行清单；run_id 只依赖稳定运行条件。"""
+    """Generate the minimal run manifest; run_id depends only on stable run conditions."""
     identity = {
         'config': config,
         'seed': seed,
@@ -180,7 +180,7 @@ manifest = build_run_manifest(
 print(json.dumps(manifest, ensure_ascii=False, indent=2))
 ```
 
-## Q4 验证：相同条件与变化条件能否被区分？
+## Q4 verification: Can identical conditions and changed conditions be distinguished?
 
 ```python
 config = {'model': 'TinyLM', 'batch_size': 4}
@@ -194,16 +194,16 @@ assert set(first) == {'config', 'seed', 'input_source', 'artifact_path', 'run_id
 print('✅ 最小运行清单通过')
 ```
 
-### 本节小结
+### Section Summary
 
-- 配置覆盖后仍需检查运行所需字段。
-- 路径和 `with` 分别负责文件定位与资源生命周期。
-- 稳定路径区分输入、缓存、日志和 artifact。
-- manifest 用配置、seed、输入来源和 `run_id` 标识一次可复查运行。
-## 相关阅读
+- After overriding configuration, you still need to check the fields required for a run.
+- Paths and `with` handle file location and resource lifecycle respectively.
+- Stable paths separate inputs, caches, logs, and artifacts.
+- A manifest identifies a reviewable run with the configuration, seed, input source, and `run_id`.
+## Related Reading
 
-建立配置与运行身份后，可以继续进入张量输入、检查点和批次契约。
+Now that configuration and run identity are in place, you can continue with tensor inputs, checkpoints, and batch contracts.
 
-- [05. PyTorch Tensor Fundamentals | PyTorch 张量基础操作](./05_PyTorch_Tensor_Fundamentals.md)
-- [10. PyTorch State, Checkpoint, and Recovery | PyTorch 状态、Checkpoint 与恢复](./10_PyTorch_State_dict_and_Persistence.md)
-- [12. PyTorch Data Interface and Training Lifecycle | PyTorch 数据接口与训练生命周期](./12_PyTorch_Minimal_Training_Interface.md)
+- [05. PyTorch Tensor Fundamentals](./05_PyTorch_Tensor_Fundamentals.md)
+- [10. PyTorch State, Checkpoint, and Recovery](./10_PyTorch_State_dict_and_Persistence.md)
+- [12. PyTorch Data Interface and Training Lifecycle](./12_PyTorch_Minimal_Training_Interface.md)

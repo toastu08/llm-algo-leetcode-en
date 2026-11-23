@@ -1,6 +1,6 @@
 # 10. PyTorch State dict and Persistence | PyTorch 状态、Checkpoint 与恢复
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `PyTorch`, `state_dict`, `持久化` | **目标人群：** 准备保存、恢复或迁移模型状态的学习者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `PyTorch`, `state_dict`, `persistence` | **Audience:** learners preparing to save, restore, or migrate model state
 
 > 🚀 **云端运行环境**
 >
@@ -10,24 +10,24 @@
 > [![Open In Studio](https://img.shields.io/badge/Open%20In-ModelScope-blueviolet?logo=alibabacloud)](https://modelscope.cn/my/mynotebook) *(国内推荐：魔搭社区免费实例)*
 
 
-## 本节导读
+## Section Guide
 
-模型持久化需要同时处理状态内容、独立快照、结构兼容性和训练进度。只保存模型权重，无法完整恢复优化轨迹和验证状态。
+Model persistence must handle the state contents, independent snapshots, structural compatibility, and training progress at the same time. Saving only the model weights cannot fully restore the optimization trajectory and validation state.
 
-完成本节后，你应能区分模型产物与训练检查点，判断状态是否可迁移、可恢复，并识别恢复训练所缺少的对象。
+After completing this section, you should be able to distinguish a model artifact from a training checkpoint, judge whether state can be migrated and restored, and identify the objects missing for resuming training.
 
-**关键词：** `state_dict`, `artifact`, `training checkpoint`, `resume`
+**Keywords:** `state_dict`, `artifact`, `training checkpoint`, `resume`
 
-![模型状态的保存、迁移与恢复](../public/00_Prerequisites/10_state_persistence_map.svg)
+![Saving, migrating, and restoring model state](../public/00_Prerequisites/10_state_persistence_map.svg)
 
-## 前置阅读
-**导语：** 先确认 parameter 与 buffer 如何注册，再观察这些状态如何离开当前模型实例并被恢复。
-- [09. PyTorch nn.Module Basics | PyTorch nn.Module 基础](./09_PyTorch_nn_Module_Basics.md)
-- [0C 组页](./0C.md)
+## Prerequisite Reading
+**Overview:** First confirm how parameters and buffers are registered, then observe how this state leaves the current model instance and is restored.
+- [09. PyTorch nn.Module Basics](./09_PyTorch_nn_Module_Basics.md)
+- [0C Group Page](./0C.md)
 
-## Q1：`state_dict` 解决什么问题？
+## Q1: What problem does `state_dict` solve?
 
-模型不只包含可训练参数，还可能包含 running statistics、mask 或缩放量等 buffer。`state_dict` 用稳定 key 将这些 Tensor 汇总为模型状态，但不会保存 Python 类定义和普通属性。
+A model not only contains trainable parameters, but may also contain buffers such as running statistics, masks, or scale values. `state_dict` uses stable keys to collect these tensors into the model state, but does not save the Python class definition or ordinary attributes.
 
 
 ```python
@@ -41,7 +41,7 @@ class TinyNet(nn.Module):
     def __init__(self):
         super().__init__()
         self.linear = nn.Linear(2, 1)
-        # buffer 常用来存 scale、mask、统计量或缓存这类“要保存但不训练”的状态。
+        # A buffer is often used for state such as scale, masks, statistics, or caches that "should be saved but not trained".
         self.register_buffer('scale', torch.tensor(1.0))
 
     def forward(self, x):
@@ -54,9 +54,9 @@ print('state_dict keys：', sorted(state.keys()))
 
 ```
 
-## Q1 验证：`state_dict` 是否同时包含参数和 buffer？
+## Q1 verification: Does `state_dict` contain both parameters and buffers?
 
-这里直接看 keys，确认参数和 buffer 都在，但普通属性不在。
+Look at the keys directly here to confirm that both parameters and buffers are present, while ordinary attributes are not.
 
 
 ```python
@@ -69,9 +69,9 @@ print('✅ state_dict keys 通过')
 
 ```
 
-## Q2：怎样把模型状态写入独立介质并恢复到新实例？
+## Q2: How do you write model state to an independent medium and restore it into a new instance?
 
-直接把一个模型自己的 `state_dict` 再加载回去，无法验证序列化链路。更完整的检查应把状态写入独立字节流，再由新建模型实例读取并恢复。
+Loading a model's own `state_dict` straight back into it cannot verify the serialization path. A more complete check should write the state to an independent byte stream, and then have a newly created model instance read and restore it.
 
 
 ```python
@@ -93,9 +93,9 @@ print('序列化字节数：', state_buffer.getbuffer().nbytes)
 
 ```
 
-## Q2 验证：新实例的参数、buffer 与输出是否一致？
+## Q2 verification: Are the new instance's parameters, buffers, and outputs identical?
 
-状态恢复后，不只要比较 key，还要比较 Tensor 值与相同输入上的模型输出。
+After restoring the state, you should compare not only the keys but also the tensor values and the model output on the same input.
 
 
 ```python
@@ -108,9 +108,9 @@ print('✅ 独立序列化与恢复通过')
 
 ```
 
-## Q3：结构变化时，严格加载与部分加载有什么区别？
+## Q3: When the structure changes, how do strict loading and partial loading differ?
 
-严格加载要求当前模型与保存状态拥有完全一致的 key。结构迁移时可以使用 `strict=False`，但必须检查返回的 missing 与 unexpected keys，不能把“没有抛异常”当作迁移成功。
+Strict loading requires the current model and the saved state to have exactly the same keys. During structural migration you can use `strict=False`, but you must check the returned missing and unexpected keys, and must not treat "no exception was raised" as a successful migration.
 
 
 ```python
@@ -135,9 +135,9 @@ print('unexpected keys：', load_result.unexpected_keys)
 
 ```
 
-## Q3 验证：迁移报告是否准确指出新增结构？
+## Q3 verification: Does the migration report accurately point out the newly added structure?
 
-新增 head 应成为 missing keys，而原模型状态不应产生 unexpected keys。严格模式的错误信息也应指出缺失项。
+The added head should become a missing key, and the original model state should not produce unexpected keys. The strict-mode error message should also point out the missing entries.
 
 
 ```python
@@ -148,14 +148,14 @@ print('✅ strict / non-strict 加载报告通过')
 
 ```
 
-## Q4：怎样让模型产物携带可检查的版本信息？
+## Q4: How do you make a model artifact carry checkable version information?
 
-裸 `state_dict` 只能说明有哪些 Tensor。可维护的模型产物还应记录格式版本、模型类型和构造参数；加载函数则应返回结构化报告，让调用者明确哪些状态被恢复。
+A bare `state_dict` can only show which tensors exist. A maintainable model artifact should also record the format version, the model type, and the construction parameters; the load function should return a structured report so that the caller can see exactly which state was restored.
 
 
 ```python
 def build_model_artifact(model, format_version, model_config):
-    """打包模型状态以及重建模型所需的最小元数据。"""
+    """Package the model state together with the minimal metadata needed to rebuild the model."""
     return {
         'format_version': format_version,
         'model_class': type(model).__name__,
@@ -165,7 +165,7 @@ def build_model_artifact(model, format_version, model_config):
 
 
 def load_model_artifact(artifact, model, strict=True):
-    """加载模型状态，并返回可审计的兼容性报告。"""
+    """Load the model state and return an auditable compatibility report."""
     result = model.load_state_dict(artifact['model_state'], strict=strict)
     return {
         'format_version': artifact['format_version'],
@@ -182,9 +182,9 @@ print(report)
 
 ```
 
-## Q4 验证：模型产物与加载报告是否一致？
+## Q4 verification: Are the model artifact and the load report consistent?
 
-报告需要保留格式版本和模型类型，并明确严格加载没有缺失或意外 key。模型继续变化时，已经生成的产物也必须保持为独立快照。
+The report needs to preserve the format version and the model type, and make clear that strict loading has no missing or unexpected keys. As the model keeps changing, artifacts that have already been generated must also remain independent snapshots.
 
 
 ```python
@@ -201,23 +201,23 @@ print('✅ 模型产物与加载报告通过')
 
 ```
 
-## Q5：怎样让最佳指标、早停与可续训 checkpoint 使用同一训练状态？
+## Q5: How do you make the best metric, early stopping, and a resumable checkpoint use the same training state?
 
-验证指标改善时，需要更新最佳指标、保存对应模型状态并清零未改善计数；连续未改善时，早停计数才推进。用于恢复训练的 checkpoint 必须把计算状态、更新状态和训练进度保存到同一个时间点。
+When the validation metric improves, you need to update the best metric, save the corresponding model state, and reset the no-improvement counter; only on consecutive non-improvements does the early-stopping counter advance. A checkpoint used to resume training must save the computational state, update state, and training progress at the same point in time.
 
-| 状态类别 | 本例保存的内容 | 缺失后的直接影响 |
+| State category | What this example saves | Direct impact if missing |
 |:---|:---|:---|
-| 模型状态 | parameter 与 buffer | 恢复后的前向结果不同 |
-| 优化器状态 | AdamW 的步数与矩估计 | 参数更新轨迹重新开始 |
-| 调度器状态 | 当前学习率阶段 | 学习率推进位置错误 |
-| 随机状态 | Python、PyTorch CPU；已初始化 CUDA 时也保存 CUDA | 随机输入、采样或随机算子无法复现 |
-| 训练进度 | epoch、micro-step、optimizer-step | 数据位置和更新次数无法对齐 |
-| 验证状态 | 最佳指标、未改善轮数与最佳模型 | 模型选择和早停判断丢失 |
+| Model state | parameters and buffers | The forward results differ after restoring |
+| Optimizer state | AdamW steps and moment estimates | The parameter update trajectory restarts |
+| Scheduler state | current learning-rate stage | The learning-rate advancement position is wrong |
+| Random state | Python, PyTorch CPU; CUDA too when already initialized | Random inputs, sampling, or random operators cannot be reproduced |
+| Training progress | epoch, micro-step, optimizer-step | Data position and update count cannot be aligned |
+| Validation state | best metric, no-improvement epochs, best model | Model selection and early-stopping judgment are lost |
 
 
 ```python
 def update_validation_state(val_loss, state, model):
-    """根据验证损失更新 best checkpoint 与早停计数。"""
+    """Update the best checkpoint and the early-stopping counter based on the validation loss."""
     updated = dict(state)
     if val_loss < state['best_val_loss']:
         updated['best_val_loss'] = float(val_loss)
@@ -230,7 +230,7 @@ def update_validation_state(val_loss, state, model):
 
 
 def capture_rng_state():
-    """保存本进程实际使用的 Python 与 PyTorch 随机状态。"""
+    """Save the Python and PyTorch random state actually used by this process."""
     return {
         'python': random.getstate(),
         'torch_cpu': torch.get_rng_state().clone(),
@@ -250,7 +250,7 @@ def restore_rng_state(rng_state):
 
 
 def build_training_checkpoint(model, optimizer, scheduler, progress, validation_state):
-    """保存继续训练所需的模型、更新器、进度与随机数状态。"""
+    """Save the model, updaters, progress, and RNG state needed to continue training."""
     return {
         'format_version': 1,
         'model': copy.deepcopy(model.state_dict()),
@@ -263,7 +263,7 @@ def build_training_checkpoint(model, optimizer, scheduler, progress, validation_
 
 
 def restore_training_checkpoint(checkpoint, model, optimizer, scheduler):
-    """恢复训练状态并返回进度字段。"""
+    """Restore the training state and return the progress fields."""
     model.load_state_dict(checkpoint['model'])
     optimizer.load_state_dict(checkpoint['optimizer'])
     scheduler.load_state_dict(checkpoint['scheduler'])
@@ -275,7 +275,7 @@ def restore_training_checkpoint(checkpoint, model, optimizer, scheduler):
 
 
 def run_random_training_step(model, optimizer, scheduler):
-    """用 Python 与 PyTorch RNG 构造一步可复现的续跑检查。"""
+    """Build a reproducible resume check step using the Python and PyTorch RNGs."""
     random_scale = random.uniform(0.5, 1.5)
     inputs = torch.randn(3, 2) * random_scale
     target = inputs.sum(dim=1, keepdim=True)
@@ -316,9 +316,9 @@ print('checkpoint fields：', sorted(training_checkpoint))
 
 ```
 
-## Q5 验证：最佳状态和训练进度能否一起恢复？
+## Q5 verification: Can the best state and the training progress be restored together?
 
-字段相等只能证明对象被读回。更强的检查是：恢复随机状态后再执行一步，随机输入、损失和更新后参数都应与未中断路径一致；checkpoint 本身也必须保持为独立快照。
+Equal fields only prove that the objects were read back. A stronger check is: after restoring the random state, run one more step, and the random inputs, loss, and updated parameters should all match the uninterrupted path; the checkpoint itself must also remain an independent snapshot.
 
 
 ```python
@@ -362,9 +362,9 @@ print('✅ 最佳状态、早停字段与可续训 checkpoint 通过')
 
 ```
 
-## 相关阅读
+## Related Reading
 
-状态能够可靠恢复后，再学习优化器更新，并在数据接口页把它们接成完整训练生命周期。
+Now that state can be restored reliably, continue with optimizer updates, and connect them into a complete training lifecycle on the data interface page.
 
-- [11. PyTorch Optimizers and Loss | PyTorch 优化器与损失函数](./11_PyTorch_Optimizers_and_Loss.md)
-- [12. PyTorch Data Interface and Training Lifecycle | PyTorch 数据接口与训练生命周期](./12_PyTorch_Minimal_Training_Interface.md)
+- [11. PyTorch Optimizers and Loss](./11_PyTorch_Optimizers_and_Loss.md)
+- [12. PyTorch Data Interface and Training Lifecycle](./12_PyTorch_Minimal_Training_Interface.md)
