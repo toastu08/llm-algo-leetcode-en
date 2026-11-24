@@ -1,8 +1,8 @@
 # PROGRESS.md — English Translation Progress
 
 > **Last updated:** 2026-11-24  
-> **Overall:** 67 / 472 source files translated (14.2%)  
-> **Current focus:** M2 Part 01 is complete; next is M3 Part 02 — start with batch `02-P` (prose and navigation)
+> **Overall:** 78 / 472 source files translated (16.5%)  
+> **Current focus:** M3 Part 02 batch `02-P` is complete; next is batch `02-1` (notebooks 00–14)
 
 This file is the single source of truth for translation status. Update it
 after every file and every batch. Do not delete completed rows.
@@ -25,7 +25,7 @@ after every file and every batch. Do not delete completed rows.
 | M0 | Bootstrap and dry run | 0 | 0 | 0 | 0 | 0 | ✅ |
 | M1 | Part 00 — Prerequisites | 26 | 26 | 0 | 0 | 0 | 100% |
 | M2 | Part 01 — Hardware, Math, and Systems | 41 | 41 | 0 | 0 | 0 | 100% |
-| M3 | Part 02 — PyTorch Algorithms | 136 | 0 | 0 | 0 | 136 | 0% |
+| M3 | Part 02 — PyTorch Algorithms | 136 | 11 | 0 | 0 | 125 | 8.1% |
 | M4 | Part 03 — Triton Kernels | 26 | 0 | 0 | 0 | 26 | 0% |
 | M5 | Part 04 — CUDA and System Optimization | 25 | 0 | 0 | 0 | 25 | 0% |
 | M6 | Part 05 — Integrated Projects and Decisions | 13 | 0 | 0 | 0 | 13 | 0% |
@@ -34,7 +34,7 @@ after every file and every batch. Do not delete completed rows.
 | M9 | Docs-only pages | 14 | 0 | 0 | 0 | 14 | 0% |
 | M10 | Ancillary development and environment docs (optional) | 5 | 0 | 0 | 0 | 5 | 0% |
 | M11 | Regeneration and final QA | 0 | 0 | 0 | 0 | 0 | — |
-| **Total** | | **472** | **67** | **0** | **0** | **405** | **14.2%** |
+| **Total** | | **472** | **78** | **0** | **0** | **394** | **16.5%** |
 
 Update the counts as you go. A file counts as “Translated” only when it
 meets the definition of done in `AGENTS.md` §13. “Reviewed” means a second
@@ -42,12 +42,12 @@ agent checked it and confirmed the same criteria.
 
 ## Current focus
 
-**M2 Part 01 is complete.** All 41 Part 01 files (7 prose pages and 34 notebooks) are translated, mirrored, and checked.
+**M3 Part 02 batch `02-P` is complete.** The Part 02 `intro.md` and the ten group pages `2_1.md`–`2_10.md` are translated, mirrored, and checked.
 
 Next focus:
 
-- Start M3 Part 02 with batch `02-P` (11 prose/navigation pages: `intro.md` and `2_1.md`–`2_10.md`).
-- Then proceed through the Part 02 notebook batches `02-1` onward.
+- Proceed through the Part 02 notebook batches, starting with `02-1` (notebooks 00–14).
+- The group pages already point at those notebooks, so each notebook batch also completes the reading paths described by `2_1.md`–`2_10.md`.
 
 ### M0 dry-run notes
 
@@ -166,17 +166,17 @@ notes. Append `· reviewed`, `· blocked: reason`, or a short note as needed.
 
 #### 02-P — Prose and navigation (11 files, 9,760 CJK)
 
-- [ ] `02_PyTorch_Algorithms/intro.md`
-- [ ] `02_PyTorch_Algorithms/2_1.md`
-- [ ] `02_PyTorch_Algorithms/2_2.md`
-- [ ] `02_PyTorch_Algorithms/2_3.md`
-- [ ] `02_PyTorch_Algorithms/2_4.md`
-- [ ] `02_PyTorch_Algorithms/2_5.md`
-- [ ] `02_PyTorch_Algorithms/2_6.md`
-- [ ] `02_PyTorch_Algorithms/2_7.md`
-- [ ] `02_PyTorch_Algorithms/2_8.md`
-- [ ] `02_PyTorch_Algorithms/2_9.md`
-- [ ] `02_PyTorch_Algorithms/2_10.md`
+- [x] `02_PyTorch_Algorithms/intro.md`
+- [x] `02_PyTorch_Algorithms/2_1.md`
+- [x] `02_PyTorch_Algorithms/2_2.md`
+- [x] `02_PyTorch_Algorithms/2_3.md`
+- [x] `02_PyTorch_Algorithms/2_4.md`
+- [x] `02_PyTorch_Algorithms/2_5.md`
+- [x] `02_PyTorch_Algorithms/2_6.md`
+- [x] `02_PyTorch_Algorithms/2_7.md`
+- [x] `02_PyTorch_Algorithms/2_8.md`
+- [x] `02_PyTorch_Algorithms/2_9.md`
+- [x] `02_PyTorch_Algorithms/2_10.md`
 
 #### 02-1 — Notebooks 00–14 (15 files, 37,146 CJK)
 
@@ -709,6 +709,7 @@ notes. Append `· reviewed`, `· blocked: reason`, or a short note as needed.
 | 2026-11-24 | OpenCode | M2 `01-A` (groups 1A + 1B, 13 notebooks) | 13 | Structure diff, AST (docstrings normalized), cell metadata/outputs, comment/docstring CJK scan, mirror check, chapter links | 0 CJK in markdown prose beyond the numbered H1 subtitles and 0 in code comments/docstrings; heading levels, table column counts, and link/image targets match the baseline; code-cell dict values that are displayed as data were left in Chinese per the string-literal policy; no notebook outputs changed; mirrors rebuilt for the 13 notebooks |
 | 2026-11-24 | OpenCode | M2 `01-B` (groups 1C + 1D, 13 notebooks) | 13 | Structure diff, AST (docstrings normalized), cell metadata/outputs, comment/docstring CJK scan, `json.tool` + `nbformat.validate` on all 13, mirror check, chapter links | 0 CJK in markdown prose beyond the numbered H1 subtitles and 0 in code comments/docstrings; heading levels, table column counts, and link/image targets match the baseline; remaining code CJK is print/assert/trade-off label strings plus expert-case names, left unchanged per the string-literal policy; no notebook outputs changed; mirrors rebuilt for the 13 notebooks; mirror rebuild also rewrote three untranslated mirrors (31/33/34) with generator-only whitespace noise, which was reverted |
 | 2026-11-24 | OpenCode | M2 `01-C` (groups 1E + 1F, 8 notebooks) + M2 close-out | 8 | Structure diff, AST (docstrings normalized), cell metadata/outputs, comment/docstring CJK scan, `json.tool` + `nbformat.validate` on all 8, full Part 01 mirror rebuild, mirror and chapter-link checks | 0 CJK in markdown prose beyond the numbered H1 subtitles and 0 in code comments/docstrings; heading levels, table column counts, and link/image targets match the baseline; remaining code CJK is `raise ValueError`/`print` string literals plus dict values, left unchanged per the string-literal policy; no notebook outputs changed; `convert_notebook.py --dir` + `sync_docs_navigation.py --part` regenerated only the 8 changed mirrors; `check_source_docs_mirror.py` and `check_chapter_links.py` pass; M2 closed at 41/41 |
+| 2026-11-24 | OpenCode | M3 `02-P` (intro, 2_1–2_10, 11 pages) | 11 | Structure diff, residual-CJK scan, mirror check, chapter links | 0 CJK in prose or headings; the only residual CJK is one compatibility anchor on `2_10.md` (`#project-chains-and-stable-ids--项目链与稳定身份`), preserved for an inbound link from `docs/part02_result_assets.md`; heading levels, table shapes, link/image targets, blank lines, and fences match the baseline; mirrors regenerated for the 11 pages only; `check_source_docs_mirror.py` and `check_chapter_links.py` pass; `check_docs_links.py` could not build (no `vitepress`), and its internal rebuild rewrote 54 out-of-scope Part 02 notebook mirrors with whitespace-only noise, which was reverted |
 
 ## Roadblocks and quirks
 
@@ -764,6 +765,11 @@ Add new terms discovered during translation. Later, merge them into
 | 算子合法化 | operator legalization | `01_Hardware_Math_and_Systems/32_TVM_MLIR_Deep_Practice` | Stage that checks whether operators and dtypes can enter the target |
 | 逐层降级 | progressive lowering | `01_Hardware_Math_and_Systems/32_TVM_MLIR_Deep_Practice` | Successive IR-level lowering along the compile chain |
 | 可执行契约 | executable contract | `01_Hardware_Math_and_Systems/34_Heterogeneous_Accelerators_and_Runtime_Constraints` | Declared device/runtime conditions versus actual loading and execution |
+| 工程收口 | engineering closure | `02_PyTorch_Algorithms/2_10.md` | Closing a Part with comparable, reproducible project evidence |
+| 留一基线 | leave-one-out baseline | `02_PyTorch_Algorithms/2_5.md` | Group baseline that excludes the current answer |
+| 语义编号 / 语义 ID | semantic ID | `02_PyTorch_Algorithms/2_8.md`, `2_10.md` | Stable project identifier that survives file renumbering |
+| 候选拓扑 | candidate topology | `02_PyTorch_Algorithms/2_6.md` | Draft structure of a speculative generation scheme |
+| 训练状态驻留 | training-state residency | `02_PyTorch_Algorithms/2_3.md`, `2_9.md` | Where optimizer state, gradients, and parameters reside |
 
 ## Content issues
 
@@ -774,6 +780,9 @@ Translate it faithfully anyway; do not fix it.
 | --- | --- | --- |
 | `01_Hardware_Math_and_Systems/34_Heterogeneous_Accelerators_and_Runtime_Constraints.ipynb` | Related-reading label reads “09. Distributed Communication Primitives” but links to `04_.../13_Distributed_Communication_Primitives.ipynb` | Translated the label as-is (English half only); numbering mismatch left unfixed |
 | `01_Hardware_Math_and_Systems/32_TVM_MLIR_Deep_Practice.ipynb` | Notebook H1 English half is “TVM / MLIR Compilation Pipeline”, while the generated docs mirror uses “TVM MLIR Deep Practice” (derived from the file name) | Left both as generated; no hand edit of mirrors |
+| `02_PyTorch_Algorithms/intro.md` | The group table maps 2.3→SFT/LoRA (09–13), 2.4→preference optimization (14–16), 2.5→backpropagation (17–19), 2.6→inference intuition (20–22), but the actual group pages are 2.3 backpropagation/training control, 2.4 SFT/adaptation, 2.5 preference optimization, 2.6 inference execution | Translated both sides as-is; numbering mismatch left unfixed |
+| `02_PyTorch_Algorithms/2_10.md` | “Primary owner” links for 62/64/65 point to 2.3, 84/85/86 to 2.4, and 73/74/75/76 to 2.5, following the older group numbering used in `intro.md` | Translated as-is; mismatch left unfixed |
+| `02_PyTorch_Algorithms/2_8.md`, `2_9.md`, `2_10.md` | Links target files that do not exist: `75_Memory_Budget_Compression_Project.ipynb`, `87_Model_Internal_Parallel_Benchmark.ipynb`, `41_FP8_and_KV_Cache_Quantization.ipynb`, and `../topic_discussion/operator_optimization/05_cost_model_and_profiling.md` | Link targets left unchanged; broken-link list recorded here |
 
 ## How to update this file
 
