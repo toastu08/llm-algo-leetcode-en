@@ -302,6 +302,8 @@ If the H1 is bilingual, keep the English half and drop the Chinese half.
 
 ## 10. Per-file workflow
 
+Work on `translation/en`; confirm with `git branch --show-current` (§15.1).
+
 1. Confirm the file is in scope and in your assigned batch (`SPEC.md`).
 2. Read the whole file before editing.
 3. Translate all in-scope prose.
@@ -326,7 +328,8 @@ If the H1 is bilingual, keep the English half and drop the Chinese half.
    - For `docs/05` sub-pages: final QA only (see `SPEC.md` §6).
 5. Run link/mirror checks.
 6. Update the dashboard, session log, and notes in `PROGRESS.md`.
-7. Commit the batch on the translation branch (one commit per batch recommended).
+7. Commit the batch on `translation/en` (one commit per batch recommended).
+   Committing locally is allowed and expected; **pushing is not** (see §15).
 
 Do **not** run `tools/sync_docs_index.py`; it overwrites `docs/index.md` from
 the excluded `README.md`.
@@ -343,15 +346,20 @@ python -c "import nbformat,sys; nbformat.validate(nbformat.read(sys.argv[1], as_
 ### 12.2 Code-cell AST comparison
 
 For each translated notebook, compare the current code cells with the original
-from Git:
+from Git. The baseline is the upstream commit the translation started from,
+**not** `main`:
 
 ```bash
-# On the translation branch, main holds the pre-translation baseline.
-git show main:path/to/notebook.ipynb > /tmp/original.ipynb
+# Baseline commit: upstream main at clone time (recorded in PROGRESS.md).
+git show 570d681:path/to/notebook.ipynb > /tmp/original.ipynb
+
+# Equivalent while no upstream merge has been done:
+git show "$(git merge-base main translation/en)":path/to/notebook.ipynb
 ```
 
-If you are working directly on `main`, replace `main` with the pre-translation
-commit hash.
+`main` mirrors newer upstream content, so it is no longer a valid
+pre-translation baseline. After an upstream sync, use the upstream commit the
+batch was merged onto and record it in `PROGRESS.md`.
 
 Parse both with `ast` per code cell. A safe translation changes only comments,
 docstrings, or whitespace. If the AST differs elsewhere, revert and redo the
@@ -425,6 +433,8 @@ When delegating a batch to a subagent:
 - Give it the milestone ID, batch ID, and exact file list.
 - Tell it to read `AGENTS.md`, `SPEC.md`, `PROGRESS.md`, and
   `docs/terminology.md` first.
+- Tell it to work on `translation/en`: no commits on `main`, and **no pushes**
+  (§15). It may commit locally and must report the commit SHAs.
 - Assign disjoint files. Never let two agents edit the same file.
 - Require it to update `PROGRESS.md` and report residual-CJK counts.
 - Forbid edits to tools, tests, configs, images, `README.md`, and
@@ -433,10 +443,47 @@ When delegating a batch to a subagent:
 
 ## 15. Branch and commit hygiene
 
-- Recommended branch: `translation/en`.
-- Commit one batch at a time, for example:
-  `docs(en): translate Part 02 batch 02-3 (26–36)`.
+### 15.1 Branch model
+
+| Branch | Purpose | Agents may write? |
+| --- | --- | --- |
+| `main` | Read-only mirror of `datawhalechina/llm-algo-leetcode` (the `upstream` remote). Only ever fast-forwards to upstream. | **No** |
+| `translation/en` | The English translation workstream. Every translation commit goes here. | Yes |
+
+Before editing any file, confirm the branch:
+
+```bash
+git branch --show-current   # must print translation/en
+```
+
+If it prints anything else, run `git switch translation/en` first. If the
+switch fails (dirty tree, missing branch), stop and report it. Never resolve it
+with `reset --hard`, `checkout --force`, or a stash drop.
+
+Never commit, merge, rebase, reset, or amend on `main`. `main` carries upstream
+Chinese content, so a commit there would either be lost on the next fast-forward
+or desynchronize the fork from upstream.
+
+### 15.2 Commit locally, never push
+
+- Agents **may** create commits on `translation/en`, one batch at a time, for
+  example: `docs(en): translate Part 02 batch 02-3 (26–36)`.
+- Agents **must not** run `git push` (including `--force` and
+  `--force-with-lease`) or otherwise write to `origin` or `upstream`. SSH
+  pushes require the repository owner's key passphrase, and publishing is the
+  owner's decision. End the session with the commits in place and report what
+  was committed; the owner pushes.
+- Do not open pull requests, change remote URLs, set upstream tracking, or
+  alter branch protection/settings.
+- Do not run `git fetch` + `git merge upstream/main` unless the batch
+  explicitly asks for an upstream sync. That merge conflicts across every
+  already-translated file and needs translation-aware resolution, not a
+  mechanical conflict pick.
+
+### 15.3 What goes in a commit
+
 - Do not commit the user's untracked local files (`.python-version`,
   `pyproject.toml`, `src/`, `uv.lock`).
 - Keep generated docs and source changes in the same commit so the mirror stays
   consistent.
+- Leave `PROGRESS.md` updates in the same commit as the batch they describe.
