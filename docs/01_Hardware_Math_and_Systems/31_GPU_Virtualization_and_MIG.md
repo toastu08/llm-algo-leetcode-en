@@ -1,6 +1,6 @@
 # 31. GPU Virtualization and MIG | GPU 虚拟化与 MIG
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `硬件系统`, `GPU 虚拟化`, `MIG` | **目标人群：** 硬件约束学习者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `hardware systems`, `GPU virtualization`, `MIG` | **Audience:** learners of hardware constraints
 
 > 🚀 **云端运行环境**
 >
@@ -12,35 +12,35 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-同一个模型独占设备时延迟稳定，与其他任务共享后，尾延迟却可能升高。为任务划出独立资源可以减少部分争用，但也可能让一个分区空闲、另一个分区容量不足，并降低总体吞吐。
+When the same model has exclusive use of the device, latency is stable; once it shares the device with other tasks, tail latency may rise. Carving out independent resources for a task can reduce some contention, but may also leave one partition idle while another lacks capacity, and lower overall throughput.
 
-本节先用理想等分计算每片资源和未分配余量，再用构造的服务指标比较吞吐、P99 与波动。完成后，你应能同时指出隔离带来的改善和损失，再到性能分析与部署专题核对真实设备上的资源边界和服务表现。
+This section first computes the resources per slice and the unallocated remainder using ideal equal partitioning, then compares throughput, P99, and fluctuation using constructed service metrics. After completing it, you should be able to point out both the improvements and the losses brought by isolation, and then check the resource boundaries and service behavior on real devices in the performance analysis and deployment topics.
 
-**关键词：** `MIG`、`MPS`、多租户
+**Keywords:** `MIG`, `MPS`, multi-tenancy
 
-![GPU 共享、MIG 切分与服务证据](../public/01_Hardware_Math_and_Systems/31_gpu_isolation_mig.svg)
+![GPU sharing, MIG slicing, and service evidence](../public/01_Hardware_Math_and_Systems/31_gpu_isolation_mig.svg)
 
 ---
-## 前置阅读
+## Prerequisite Reading
 
-**导语：** 本页只处理多租户场景；先确认候选已经满足基本运行时约束。
+**Overview:** This page deals only with the multi-tenant scenario; first confirm that the candidate already satisfies the basic runtime constraints.
 
-- [34. Heterogeneous Accelerators and Runtime Constraints | 异构加速器与运行时约束](./34_Heterogeneous_Accelerators_and_Runtime_Constraints.md)
+- [34. Heterogeneous Accelerators and Runtime Constraints](./34_Heterogeneous_Accelerators_and_Runtime_Constraints.md)
 
-## Q1：GPU 虚拟化为什么首先是资源隔离问题？
+## Q1: Why is GPU virtualization first a resource isolation problem?
 
 
-多租户场景里，GPU 不只是“给谁用”，而是“怎么让很多任务共用同一块卡，同时还不互相干扰”。
+In a multi-tenant scenario, the GPU is not just about "who gets to use it," but "how to let many tasks share the same card without interfering with each other."
 
-如果没有隔离，某个任务可能会抢占过多算力、缓存、显存或调度窗口，导致别的任务延迟飙升、尾延迟变差。
+Without isolation, one task may seize too much compute, cache, VRAM, or scheduling window, causing other tasks' latency to spike and tail latency to degrade.
 
-所以 GPU 虚拟化的第一目标，不是简单提高利用率，而是先把共享资源的干扰边界定义清楚，让性能更可控。
+So the first goal of GPU virtualization is not simply to increase utilization, but to first define the interference boundaries of shared resources clearly so that performance is more controllable.
 
-### Q1 资源计算：理想等分会留下多少整数资源
+### Q1 Resource Calculation: How much integer resource ideal equal partitioning leaves
 
-假设内存可以连续等分，计算单元只能按整数分配，每片至少获得一个单元。这里不生成 MIG 配置，也不表示示例中的任意分法受真实硬件支持；GB 使用十进制单位。
+Assume memory can be divided evenly and continuously, compute units can only be allocated as integers, and each slice receives at least one unit. This does not generate MIG configurations, nor does it mean any arbitrary partitioning in the example is supported by real hardware; GB uses decimal units.
 
 
 ```python
@@ -48,7 +48,7 @@ import math
 
 
 def partition_resources(total_memory_gb, total_compute_units, slices, reserved_memory_gb=0.0):
-    """计算等分切片后的每片资源与整数计算单元碎片。"""
+    """Compute the resources per slice and the integer compute-unit fragmentation after equal partitioning."""
     if (not math.isfinite(total_memory_gb) or total_memory_gb <= 0
             or type(total_compute_units) is not int or total_compute_units <= 0
             or type(slices) is not int or not 0 < slices <= total_compute_units):
@@ -69,21 +69,21 @@ assert partition_resources(80, 108, 7, 2)['unused_compute_units'] == 3
 
 ```
 
-## Q2：MIG 的本质是在切什么边界？
+## Q2: What boundaries is MIG essentially slicing?
 
 
-MIG 的核心，不是“把一块 GPU 拆成几块”这么简单，而是把算力、显存和部分调度边界切开，让不同租户在更稳定的资源切片里运行。
+The core of MIG is not simply "splitting one GPU into several," but slicing apart compute, VRAM, and some scheduling boundaries so that different tenants run in more stable resource slices.
 
-这样做的直接收益，是减少缓存和算力争用带来的抖动；间接收益，是让推理服务更容易做容量规划和 QoS 控制。
+The direct benefit is less jitter caused by contention for cache and compute; the indirect benefit is that inference services can more easily do capacity planning and QoS control.
 
-### Q2 对照计算：构造指标中的吞吐和尾延迟变化
+### Q2 Contrast Calculation: Throughput and tail-latency changes in constructed metrics
 
-假设两份记录来自相同请求集合与计时方法，比较吞吐与 P99。示例不在本机测量隔离效果；同时检查百分位顺序，避免把 P99 小于 P50 的无效记录带入判断。
+Assume the two records come from the same request set and timing method, and compare throughput and P99. The example does not measure the isolation effect on this machine; it also checks the percentile order to avoid bringing invalid records with P99 less than P50 into the judgment.
 
 
 ```python
 def isolation_delta(shared, isolated):
-    """比较共享与隔离方案的吞吐、P99 和尾延迟放大。"""
+    """Compare throughput, P99, and tail-latency amplification of the shared and isolated plans."""
     for record in (shared, isolated):
         if any(not math.isfinite(record[key]) or record[key] <= 0
                for key in ('throughput_rps', 'p50_ms', 'p99_ms')):
@@ -106,21 +106,21 @@ print(delta)
 
 ```
 
-## Q3：为什么隔离更强，吞吐未必更高？
+## Q3: Why is stronger isolation not necessarily higher throughput?
 
 
-隔离做得越强，任务之间越不容易互相干扰，但共享的效率通常也会下降；共享做得越激进，利用率可能更高，但延迟和抖动也更容易恶化。
+The stronger the isolation, the less tasks interfere with each other, but the efficiency of sharing usually decreases; the more aggressive the sharing, the higher the utilization may be, but latency and jitter are also more likely to deteriorate.
 
-所以虚拟化问题的核心，不是追求“切得更细”本身，而是在隔离、吞吐和尾延迟之间找到能接受的折中。
+So the core of the virtualization problem is not to pursue "finer slicing" itself, but to find an acceptable trade-off among isolation, throughput, and tail latency.
 
-### Q3 门槛筛选：给定指标能否同时满足要求
+### Q3 Threshold Screening: Whether the given metrics can satisfy the requirements simultaneously
 
-以下指标是构造数据；`jitter_ms` 定义为多次运行 P99 的最大值与最小值之差，需在同一重复次数和工作负载下比较。门槛来自本例目标，不是通用合格线。
+The following metrics are constructed data; `jitter_ms` is defined as the difference between the maximum and minimum P99 across multiple runs and must be compared under the same repetition count and workload. The thresholds come from the goal of this example, not a general pass line.
 
 
 ```python
 def select_isolation_plan(plans, max_p99_ms, min_throughput_rps, max_jitter_ms):
-    """先应用延迟、吞吐与抖动硬门槛，再选吞吐最高的方案。"""
+    """Apply the latency, throughput, and jitter hard thresholds first, then choose the plan with the highest throughput."""
     if any(not math.isfinite(value) or value < 0
            for value in (max_p99_ms, min_throughput_rps, max_jitter_ms)):
         raise ValueError('门槛必须是有限非负数')
@@ -155,11 +155,11 @@ print(decision)
 
 ```
 
-## 相关阅读
+## Related Reading
 
-**导语：** 隔离方案需要继续核对服务性能和长期成本。
+**Overview:** The isolation plan needs further verification of service performance and long-term cost.
 
-- [33. TCO and Cost Model | 算力评估与 TCO 模型](./33_TCO_and_Cost_Model.md)
-- [性能分析专题](../topic_discussion/performance_analysis/intro.md)
-- [部署与异构系统专题](../topic_discussion/deployment_heterogeneous/intro.md)
+- [33. TCO and Cost Model](./33_TCO_and_Cost_Model.md)
+- [Performance Analysis topic](../topic_discussion/performance_analysis/intro.md)
+- [Deployment and Heterogeneous Systems topic](../topic_discussion/deployment_heterogeneous/intro.md)
 ---

@@ -1,6 +1,6 @@
 # 30. Dynamic Shape Handling | 动态 Shape 处理
 
-**难度：** Medium-Hard | **环境：** CPU-first | **标签：** `系统工程`, `动态 Shape`, `推理服务` | **目标人群：** 编译与系统入门者
+**Difficulty:** Medium-Hard | **Environment:** CPU-first | **Tags:** `systems engineering`, `dynamic shape`, `inference serving` | **Audience:** compiler and systems beginners
 
 > 🚀 **云端运行环境**
 >
@@ -12,43 +12,43 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-计算内容没有改变，输入批次或序列长度变化，也可能让原来的执行路径无法复用。把输入补到固定形状能够减少形状种类，却会引入无效计算；桶边界过宽时，填充甚至比直接补到本批最大长度更多。
+Even if the computation itself is unchanged, a change in the input batch or sequence length may prevent the original execution path from being reused. Padding inputs to a fixed shape can reduce the number of shape variants, but introduces wasted computation; when bucket boundaries are too wide, padding may even exceed padding directly to the maximum length of the current batch.
 
-本节用形状和长度序列比较缓存键、填充数量与路径切换，再区分守卫失败、重新编译和图中断。算子优化利用这些区别检查实现的复用条件；推理优化再把填充和路径选择放回实际请求的组批与等待。
+This section uses shape and length sequences to compare cache keys, padding amounts, and path switching, then distinguishes guard failures, recompilation, and graph breaks. Operator optimization uses these distinctions to check the reuse conditions of an implementation; inference optimization then puts padding and path selection back into the batching and waiting of actual requests.
 
-**关键词：** 动态形状、守卫、重新编译、图中断、分桶
+**Keywords:** dynamic shape, guard, recompilation, graph break, bucketing
 
-![动态形状、分桶与执行路径](../public/01_Hardware_Math_and_Systems/30_dynamic_shape_specialization.svg)
+![Dynamic shapes, bucketing, and execution paths](../public/01_Hardware_Math_and_Systems/30_dynamic_shape_specialization.svg)
 
 ---
-## 前置阅读
+## Prerequisite Reading
 
-先区分图捕获、图变换和目标实现，再检查输入变化怎样影响已有版本。
+First distinguish graph capture, graph transformation, and the target implementation, then check how input changes affect existing versions.
 
-- [09 AI编译器与计算图优化](./09_AI_Compilers_and_Graph_Optimization.md)：程序、计算图与执行路径。
+- [09 AI Compilers and Graph Optimization](./09_AI_Compilers_and_Graph_Optimization.md): programs, computation graphs, and execution paths.
 
-## Q1：输入变化后，哪些编译版本仍能复用
+## Q1: Which compiled versions can still be reused after the input changes
 
-先考虑最简单的缓存模型：键只由完整形状组成，每种形状首次出现时不命中，之后出现时命中，而且缓存不会淘汰。输入的不同形状越多，这个模型的命中比例可能越低。下面的计算器只统计这种精确形状键，不调用编译器。
+First consider the simplest cache model: the key consists only of the full shape, a shape misses the first time it appears and hits on subsequent appearances, and the cache never evicts. The more distinct input shapes there are, the lower the hit ratio of this model may be. The calculator below counts only these exact-shape keys and does not call a compiler.
 
-真实编译版本通常还有守卫（guard），用于检查形状、步长、类型以及相关程序状态等适用条件。形状可以按符号与约束表达，不必每个长度都生成一个版本。例如，假设某个版本允许连续FP32输入的序列长度在128至256之间，那么128和192都可满足这组条件；改成非连续布局，即使长度仍为128，也可能不再适用。这里的范围是构造假设，不是本机编译器采集的实际守卫。
+Real compiled versions usually also have guards, which check applicability conditions such as shapes, strides, types, and related program state. Shapes can be expressed symbolically with constraints instead of generating a version for every length. For example, suppose a version allows sequence lengths between 128 and 256 for contiguous FP32 inputs; then both 128 and 192 satisfy this set of conditions; switching to a non-contiguous layout, even if the length is still 128, may make it no longer applicable. The range here is a constructed assumption, not an actual guard collected by a local compiler.
 
-守卫失败说明当前版本不适用，不说明一定要重新生成设备代码：系统还可能找到另一个已缓存的适用版本。没有可用版本时，才可能重新捕获或编译，底层编译仍可能利用已有缓存；超过限制或不支持的情况还可能回退或报错，取决于配置。图中断则发生在捕获过程中，表示当前配置无法将某段程序继续纳入同一捕获区域，与一次输入未满足旧版本条件是不同问题。
+A guard failure means the current version is not applicable; it does not mean device code must necessarily be regenerated: the system may find another cached applicable version. Only when no version is available might it re-capture or recompile, and the underlying compilation may still reuse existing caches; cases that exceed limits or are unsupported may also fall back or raise an error, depending on the configuration. A graph break, on the other hand, happens during capture and means the current configuration cannot continue to include some part of the program in the same capture region; this is a different problem from one input not satisfying the conditions of an old version.
 
-| 观察 | 发生了什么 | 还不能据此判断什么 |
+| Observation | What happened | What cannot be concluded yet |
 | --- | --- | --- |
-| 守卫失败 | 一个已有版本的适用条件不满足 | 不代表所有缓存版本都不可用，或一定重新生成代码 |
-| 重新编译 | 为变化后的程序或输入条件准备另一版本 | 不等于所有底层产物都冷编译，也不保证更快 |
-| 图中断 | 捕获无法继续跨越某段程序 | 不等于形状缓存未命中；允许分段与要求整图的模式处理不同 |
+| Guard failure | The applicability conditions of an existing version are not met | It does not mean all cached versions are unavailable, or that code must be regenerated |
+| Recompilation | Another version is prepared for the changed program or input conditions | It does not mean all underlying artifacts are compiled cold, nor does it guarantee being faster |
+| Graph break | Capture cannot continue across some part of the program | It does not equal a shape-cache miss; modes that allow segmentation and those requiring a full graph handle this differently |
 
-### Q1 机制计算器：统计精确形状键的重复比例
+### Q1 Mechanism Calculator: Count the repetition ratio of exact shape keys
 
 
 ```python
 def shape_reuse_report(shapes):
-    """模拟仅以形状为键且不淘汰的冷缓存，不调用编译器。"""
+    """Simulate a cold cache keyed only by shape with no eviction, without calling a compiler."""
     if not shapes or any(
         not isinstance(shape, (tuple, list)) or not shape
         or any(type(dim) is not int or dim <= 0 for dim in shape)
@@ -75,18 +75,18 @@ print('变化形状：', dynamic)
 
 ```
 
-## Q2：分桶能减少哪些填充，什么时候反而增加？
+## Q2: Which padding can bucketing reduce, and when does it increase padding instead?
 
-填充把不同长度的输入变成规则张量；分桶把相近长度放在一起，按指定边界补齐。桶边界接近输入时可能减少无效 Token，但边界过宽时，也可能比直接补到本批最大长度更浪费。
+Padding turns inputs of different lengths into regular tensors; bucketing groups similar lengths together and pads them to specified boundaries. Bucket boundaries close to the input may reduce wasted tokens, but when boundaries are too wide, it may also be more wasteful than padding directly to the maximum length of the current batch.
 
-下面固定请求集合，只计算补齐的 Token；它不模拟请求到达、等待组批或批量上限，也不把填充比例当作吞吐收益。
+The following fixes the request set and computes only the padded tokens; it does not simulate request arrival, waiting for batching, or batch size limits, nor does it treat the padding ratio as a throughput gain.
 
-### Q2 对照验证：同时检查分桶有利与不利的输入
+### Q2 Contrast Verification: Check inputs for which bucketing is favorable and unfavorable
 
 
 ```python
 def padding_overhead(lengths, bucket_boundaries=None):
-    """计算单一大 Batch 或按长度边界分桶后的填充 Token 数。"""
+    """Compute the number of padded tokens for a single large batch or for bucketing by length boundaries."""
     if not lengths or any(type(length) is not int or length <= 0 for length in lengths):
         raise ValueError('lengths must be positive and non-empty')
     if bucket_boundaries is None:
@@ -112,20 +112,20 @@ print('bucketed:', bucketed)
 
 ```
 
-## Q3：路径切换次数能否解释延迟波动
+## Q3: Can the number of path switches explain latency fluctuations
 
-给定长度阈值后，可以统计请求进入哪些分支，以及相邻请求切换分支的次数。但运行时选分支与编译时生成版本是两项动作：两个分支若都已有可用实现，频繁切换也无需重新编译；一直进入同一分支，仍可能因类型或步长变化触发新的适用条件检查。
+Given length thresholds, you can count which branches requests enter and how many times adjacent requests switch branches. But selecting a branch at runtime and generating a version at compile time are two separate actions: if both branches already have available implementations, frequent switching does not require recompilation; always entering the same branch may still trigger new applicability-condition checks due to changes in type or stride.
 
-图中断也不能从分支次数推断。允许分段时，可捕获区域可能分别编译，其他部分继续普通执行；`fullgraph=True` 要求本次捕获不发生图中断，遇到不支持的捕获会报错，但成功捕获的图仍可包含多个设备内核与库调用。它不是“一个GPU kernel”的保证。
+A graph break also cannot be inferred from the number of branches. When segmentation is allowed, captureable regions may be compiled separately while other parts continue normal execution; `fullgraph=True` requires that no graph break occurs during this capture and raises an error when an unsupported capture is encountered, but a successfully captured graph may still contain multiple device kernels and library calls. It is not a guarantee of "one GPU kernel".
 
-下面仅统计给定阈值下的路径变化。解释真实波动时，需要把同一次调用的输入元信息、守卫／重编译诊断、实际执行与时间样本对应起来；首次准备和预热也应与稳态耗时分开。
+The following only counts the path changes under the given thresholds. To explain real fluctuations, you need to line up the input metadata, guard/recompilation diagnostics, actual execution, and timing samples of the same call; first-time preparation and warmup should also be separated from steady-state elapsed time.
 
-### Q3 机制计算器：统计给定阈值下的分支变化
+### Q3 Mechanism Calculator: Count branch changes under the given thresholds
 
 
 ```python
 def path_stability(lengths, boundaries=(256, 1024)):
-    """统计运行时路径种类和相邻请求的路径切换次数。"""
+    """Count the types of runtime paths and the number of path switches between adjacent requests."""
     if not lengths or any(type(length) is not int or length <= 0 for length in lengths):
         raise ValueError('lengths must be positive and non-empty')
     if (len(boundaries) != 2
@@ -147,9 +147,9 @@ print('mixed:', mixed)
 
 ```
 
-## 相关阅读
+## Related Reading
 
-需要追踪具体特化实现或固定形状重放时，分别查看生成产物和运行时约束。
+When you need to trace a specific specialized implementation or fixed-shape replay, look at the generated artifacts and the runtime constraints respectively.
 
-- [Part 03 · 18 编译产物与实际执行](../03_Triton_Kernels/18_Triton_Compilation_Artifacts_and_Execution.md)：编译期常量、运行时参数与产物复用。
-- [Part 04 · 11 CUDA Graph与JIT编译](../04_CUDA_and_System_Optimization/11_CUDA_Graph_and_JIT_Compile.md)：固定工作流的地址、依赖与输入更新。
+- [Part 03 · 18 Compilation Artifacts and Actual Execution](../03_Triton_Kernels/18_Triton_Compilation_Artifacts_and_Execution.md): compile-time constants, runtime arguments, and artifact reuse.
+- [Part 04 · 11 CUDA Graph and JIT Compilation](../04_CUDA_and_System_Optimization/11_CUDA_Graph_and_JIT_Compile.md): addresses, dependencies, and input updates of a fixed workflow.

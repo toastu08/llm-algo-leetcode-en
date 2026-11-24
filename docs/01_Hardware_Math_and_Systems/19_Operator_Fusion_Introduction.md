@@ -1,6 +1,6 @@
 # 19. Operator Fusion Introduction | 算子融合导论
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `编译系统`, `算子融合`, `性能优化` | **目标人群：** 编译与系统入门者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `compiler systems`, `operator fusion`, `performance optimization` | **Audience:** compiler and systems beginners
 
 > 🚀 **云端运行环境**
 >
@@ -12,34 +12,32 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-矩阵乘之后再加偏置、执行激活时，分开的计算内核可能反复写出并读取中间结果。融合把其中一些步骤放在同一计算内核中，让中间值直接被下一步消费，同时也可能增加寄存器需求和布局转换。
+When adding a bias and executing an activation after a matrix multiply, separate compute kernels may repeatedly write out and read back intermediate results. Fusion places some of these steps in the same compute kernel so that intermediate values are consumed directly by the next step, while it may also increase register demand and layout conversions.
 
-本节比较融合前后的中间读写与启动次数，再检查语义、形状和片上资源条件。完成后，你应能算出省掉了哪些读写，并指出还需测量的代价；真实融合计算内核的实现与计时进入算子优化专题。
+This section compares the intermediate reads/writes and launch counts before and after fusion, then checks the semantic, shape, and on-chip resource conditions. After completing it, you should be able to compute which reads/writes were saved and point out the costs that still need to be measured; the implementation and timing of real fused compute kernels move on to the operator optimization topic.
 
-**关键词：** 算子融合、中间张量、内存流量、布局转换
+**Keywords:** operator fusion, intermediate tensor, memory traffic, layout conversion
 
-![算子融合前后的数据路径与验证门槛](../public/01_Hardware_Math_and_Systems/19_operator_fusion_data_path.svg)
+![Data path and verification gates before and after operator fusion](../public/01_Hardware_Math_and_Systems/19_operator_fusion_data_path.svg)
 
 ---
-## 前置阅读
+## Prerequisite Reading
 
-**导语：** 先理解图级优化对象，再检查融合怎样改变中间张量和片上资源。
+**Overview:** First understand the objects of graph-level optimization, then check how fusion changes intermediate tensors and on-chip resources.
 
-- [09. AI Compilers and Graph Optimization | AI 编译器与计算图优化](./09_AI_Compilers_and_Graph_Optimization.md)
-- [18. Triton Block Model | Triton Block 模型](./18_Triton_Block_Model.md)
+- [09. AI Compilers and Graph Optimization](./09_AI_Compilers_and_Graph_Optimization.md)
+- [18. Triton Block Model](./18_Triton_Block_Model.md)
 
-## Q1：中间张量怎样增加逻辑读写？
+## Q1: How do intermediate tensors increase logical reads/writes?
 
-串行算子链的每个组间边界都可能写出中间张量，再由下一组读取。在边界张量等大、每组对应一个核函数的假设下，可以用边界数量计算读写字节和启动次数。融合省去的是内部边界，不包含模型输入和最终输出；逻辑读写减少也不等于实际 HBM 流量或耗时按相同比例下降。
-
-### Q1 机制计算器：比较分组边界的读写字节
-
+Every group boundary in a serial operator chain may write out an intermediate tensor, which is then read by the next group. Under the assumption that boundary tensors are of equal size and each group corresponds to one kernel function, the number of boundaries can be used to compute the read/write bytes and launch counts. Fusion removes internal boundaries, not the model input and final output; a reduction in logical reads/writes also does not mean that actual HBM traffic or elapsed time drops by the same proportion.
+### Q1 Mechanism Calculator: Compare the read/write bytes of group boundaries
 
 ```python
 def fusion_traffic(num_ops, tensor_bytes, fused_groups):
-    """估算算子组边界造成的中间张量写回和重读字节数。"""
+    """Estimate the bytes written back and re-read for intermediate tensors caused by operator group boundaries."""
     if (type(num_ops) is not int or type(fused_groups) is not int
             or num_ops < 1 or not 1 <= fused_groups <= num_ops):
         raise ValueError('需要满足 1 <= fused_groups <= num_ops')
@@ -64,26 +62,26 @@ assert fully_fused['intermediate_bytes'] == 0
 
 ```
 
-## Q2：算子融合为什么能改善数据局部性？
+## Q2: Why does operator fusion improve data locality?
 
 
-融合把原本分开的多个步骤合成一条更连续的执行链。
+Fusion combines several steps that were originally separate into a more continuous execution chain.
 
-这样做的结果是：
-- 中间结果更容易留在片上；
-- 同一批数据更容易被连续复用；
-- 数据搬运和计算之间的间隔更短。
+The result of doing so is:
+- intermediate results are more likely to stay on chip;
+- the same batch of data is more likely to be reused consecutively;
+- the gap between data movement and computation is shorter.
 
-数据局部性提升后，硬件就更容易把已有数据重复利用起来，而不是每一步都重新去 HBM 找一遍。这就是为什么融合不只是“少几个函数”，而是直接改变了数据流路径。
+Once data locality improves, the hardware can more easily reuse data that is already present, instead of going back to HBM to look for it again at every step. This is why fusion is not just "a few fewer functions" but directly changes the data flow path.
 
-### Q2 机制计算器：检查片上预算和逻辑复用量
+### Q2 Mechanism Calculator: Check the on-chip budget and the logical reuse amount
 
-假设数据块可在整个消费阶段驻留片上，计算重复读取减少量。容量检查不包含其他临时值、分配粒度与同步；这只是局部预算，不是实际融合成功的证明。
+Assume a data tile can reside on chip throughout the entire consumption stage, and compute the reduction in repeated reads. The capacity check does not include other temporary values, allocation granularity, or synchronization; this is only a local budget, not proof of actual successful fusion.
 
 
 ```python
 def onchip_reuse(tile_bytes, reuse_count, onchip_budget_bytes):
-    """比较给定局部预算，并估算完整驻留假设下减少的逻辑读取量。"""
+    """Compare against the given local budget and estimate the reduced logical read volume under the full-residency assumption."""
     if any(type(value) is not int or value <= 0
            for value in (tile_bytes, reuse_count, onchip_budget_bytes)):
         raise ValueError('tile、复用次数和片上预算必须为正数')
@@ -107,19 +105,18 @@ assert plans['large_tile']['avoided_read_bytes'] == 0
 
 ```
 
-## Q3：哪些条件要先核对，哪些代价需要实测？
+## Q3: Which conditions must be checked first, and which costs need to be measured?
 
-融合前先核对语义、形状、片上资源与后端支持，再分别记录布局转换、编译和执行成本。额外布局转换可能抵消一部分收益，但不是不可执行的充分理由。
+Before fusion, check semantics, shapes, on-chip resources, and backend support, then record layout conversion, compilation, and execution costs separately. Extra layout conversions may offset part of the benefit, but they are not sufficient reason to declare the plan infeasible.
 
-下面的布尔值表示给定的核对结果，并不替代数值对照、编译或运行。只要前提满足，就保留布局字节数供后续比较；不因它大于零直接排除候选。
+The boolean values below represent given check results and do not replace numerical comparison, compilation, or execution. As long as the premises are met, the layout bytes are retained for later comparison; a candidate is not excluded directly because the value is greater than zero.
 
-### Q3 对照验证：布局转换有代价，但不自动阻止融合
-
+### Q3 Contrast Verification: Layout conversion has a cost but does not automatically prevent fusion
 
 ```python
 def fusion_decision(semantics_match, shape_supported, onchip_fit,
                     backend_lowered, reorder_bytes=0):
-    """分开记录给定检查结果与布局成本，不执行编译或数值验证。"""
+    """Record the given check results and layout cost separately; do not perform compilation or numerical verification."""
     checks = {
         'semantics_match': semantics_match,
         'shape_supported': shape_supported,
@@ -151,11 +148,11 @@ assert fusion_decision(*cases['shape_miss'])['failures'] == ['shape_supported']
 
 ```
 
-## 相关阅读
+## Related Reading
 
-**导语：** 把算子融合继续接到性能调优、归约和 attention kernel，会更直观地看到中间张量是怎么被省掉的。
+**Overview:** Continuing operator fusion into performance tuning, reductions, and attention kernels will make it more intuitive to see how intermediate tensors are saved.
 
-- [09. Triton 自动调优与基准测量 (Autotuning & Benchmarking)](../03_Triton_Kernels/09_Triton_Autotune_and_Profiling.md)
-- [07. Triton 进阶：跨线程归约与数值稳定 (Safe Softmax)](../03_Triton_Kernels/07_Triton_Fused_Softmax.md)
-- [11. Triton Flash Attention | 真正的 Flash Attention 前向算子](../03_Triton_Kernels/11_Triton_Flash_Attention.md)
+- [09. Triton Autotuning and Benchmarking](../03_Triton_Kernels/09_Triton_Autotune_and_Profiling.md)
+- [07. Triton Advanced: Cross-thread Reduction and Numerical Stability (Safe Softmax)](../03_Triton_Kernels/07_Triton_Fused_Softmax.md)
+- [11. Triton Flash Attention](../03_Triton_Kernels/11_Triton_Flash_Attention.md)
 ---

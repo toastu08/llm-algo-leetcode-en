@@ -1,6 +1,6 @@
 # 34. Heterogeneous Accelerators and Runtime Constraints | 异构加速器与运行时约束
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `异构系统`, `运行时`, `部署约束` | **目标人群：** 需要比较不同加速器执行条件的学习者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `heterogeneous systems`, `runtime`, `deployment constraints` | **Audience:** learners who need to compare the execution conditions of different accelerators
 
 > 🚀 **云端运行环境**
 >
@@ -12,30 +12,31 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-模型迁移不要求所有阶段都使用同一种设备。文本预处理可能只需少量主机内存，生成阶段却要容纳权重、缓存和工作区；若把生成阶段的需求套给预处理，就可能错误排除本来可用的 CPU。
+Model migration does not require every stage to use the same type of device. Text preprocessing may need only a small amount of host memory, while the generation stage must hold weights, cache, and workspace; if the requirements of the generation stage are imposed on preprocessing, a CPU that is actually usable might be incorrectly excluded.
 
-本节把任务拆成阶段，分别比较容量、精度、操作和运行时要求，再检查阶段之间的数据交接。完成后，你应能区分“声明匹配”“真实路径能够执行”和“性能满足要求”；这些判断接到部署与异构系统专题中的加载与执行验证。
+This section splits the task into stages, compares capacity, precision, operations, and runtime requirements separately, and then checks the data handoff between stages. After completing it, you should be able to distinguish "declared match," "the real path can execute," and "performance meets the requirement"; these judgments connect to the loading and execution verification in the deployment and heterogeneous systems topic.
 
-**关键词：** 异构加速器、模型产物、运行时、可执行契约
-![预处理与生成使用各自的设备需求](../public/01_Hardware_Math_and_Systems/34_stage_requirements_and_handoff.svg)
+**Keywords:** heterogeneous accelerators, model artifact, runtime, executable contract
 
-## 前置阅读
+![Preprocessing and generation use their own device requirements](../public/01_Hardware_Math_and_Systems/34_stage_requirements_and_handoff.svg)
 
-- [10 算力现状与替代方案](./10_Domestic_AI_Chips_Overview.md)
-- [1E 编译与后端](./1E.md)
-- [07 CPU 与 GPU 异构调度](./07_CPU_GPU_Heterogeneous_Scheduling.md)
-## Q1：声明的设备能力能排除哪些候选？
+## Prerequisite Reading
 
-先记录目标阶段的容量、精度、算子和运行时需求，再与设备声明比较。下面的 CPU、GPU、NPU 参数都是构造配置，不读取本机设备；集合中存在某个名称，不表示当前版本已经支持或实际执行了它。
+- [10 AI Chips Overview and Alternatives](./10_Domestic_AI_Chips_Overview.md)
+- [1E Compilers and Backends](./1E.md)
+- [07 CPU and GPU Heterogeneous Scheduling](./07_CPU_GPU_Heterogeneous_Scheduling.md)
+## Q1: Which candidates can the declared device capabilities rule out?
 
-| 判断维度 | 声明中要记录什么 | 实际运行仍需检查 |
+First record the capacity, precision, operator, and runtime requirements of the target stage, then compare them with the device declarations. The CPU, GPU, and NPU parameters below are all constructed configurations and do not read local devices; the presence of a name in a set does not mean the current version already supports it or has actually executed it.
+
+| Judgment dimension | What to record in the declaration | What still needs to be checked in actual execution |
 |:---|:---|:---|
-| 内存 | 对象峰值预算与设备可用容量 | 状态、工作区与其他进程的实际驻留 |
-| 精度 | 阶段所需的数据类型 | 产物格式与执行数据类型 |
-| 算子 | 阶段需要的操作集合 | 对应形状下的编译、执行与回退 |
-| 运行时与通信 | 执行框架及按需使用的集合通信 | 版本兼容、加载日志与功能测试 |
+| Memory | Peak object budget and available device capacity | Actual residency of state, workspace, and other processes |
+| Precision | Data type required by the stage | Artifact format and execution data type |
+| Operators | Set of operations required by the stage | Compilation, execution, and fallback under the corresponding shapes |
+| Runtime and communication | Execution framework and collective communication used as needed | Version compatibility, load logs, and functional tests |
 
 
 ```python
@@ -50,7 +51,7 @@ DEVICE_PROFILES = {
 
 
 def summarize_device_profile(profile):
-    """把设备 profile 转成便于比较的基础账本。"""
+    """Convert the device profile into a basic ledger that is easy to compare."""
     return {
         "memory_gb": profile["memory_gb"],
         "precision_count": len(profile["precisions"]),
@@ -63,18 +64,18 @@ def summarize_device_profile(profile):
 assert summarize_device_profile(DEVICE_PROFILES["gpu"])["operator_count"] == 4
 ```
 
-## Q2：能力声明与实际加载有什么不同？
+## Q2: What is the difference between a capability declaration and actual loading?
 
-候选身份来自模型版本、产物格式、分词器和模板；运行时检查则要确认设备、驱动、执行框架与关键操作能够配合。以下函数仅比较给定声明，不能替代模型加载或真实执行。
+Candidate identity comes from the model version, artifact format, tokenizer, and template; runtime checks must confirm that the device, driver, execution framework, and key operations can work together. The following functions only compare the given declarations and cannot replace model loading or real execution.
 
-容量使用十进制 GB，需求是所比较阶段的预计峰值。预处理阶段不应沿用生成阶段的完整模型容量与精度；各阶段的需求在下一问分别填写。
+Capacity uses decimal GB, and the requirement is the estimated peak of the compared stage. The preprocessing stage should not reuse the full model capacity and precision of the generation stage; the requirements of each stage are filled in separately in the next question.
 
-| 检查 | 本例能做什么 | 需要另外验证什么 |
+| Check | What this example can do | What needs to be verified separately |
 |:---|:---|:---|
-| 容量 | 比较给定峰值预算与声明容量 | 真实分配峰值和安全余量 |
-| 数据类型与操作 | 求集合差，列出缺失项 | 目标形状与具体版本的支持情况 |
-| 运行时 | 检查名称是否被声明支持 | 环境启动、产物加载与实际路径 |
-| 集合通信 | 仅在阶段需要时检查声明 | 多进程执行与数值结果 |
+| Capacity | Compare the given peak budget with the declared capacity | Real allocation peak and safety margin |
+| Data types and operations | Compute the set difference and list missing items | Support under the target shape and specific version |
+| Runtime | Check whether the name is declared as supported | Environment startup, artifact loading, and the actual path |
+| Collective communication | Check the declaration only when the stage requires it | Multi-process execution and numerical results |
 
 
 ```python
@@ -100,7 +101,7 @@ REQUEST_PLAN = {
 
 
 def check_device_feasibility(profile, plan):
-    """比较一个阶段与给定设备声明，不探测设备或执行模型。"""
+    """Compare one stage with the given device declaration; do not probe the device or execute the model."""
     required = ("estimated_peak_gb", "precision", "required_ops",
                 "runtime", "requires_collective")
     if any(key not in plan for key in required):
@@ -132,22 +133,22 @@ assert not check_device_feasibility(DEVICE_PROFILES["npu"], REQUEST_PLAN)["runti
 
 ```
 
-## Q3：各阶段怎样使用自己的资源与运行时需求？
+## Q3: How does each stage use its own resource and runtime requirements?
 
-预处理、生成和输出具有不同的工作集与操作。计划中直接列出每个阶段的峰值预算、精度、运行时和通信需求，不从阶段名称猜测运行时，也不把整模型需求复制给全部阶段。这里的 FP32、BF16 是相应阶段的数值类型条件。
+Preprocessing, generation, and output have different working sets and operations. The plan lists the peak budget, precision, runtime, and communication requirements of each stage directly, without guessing the runtime from the stage name or copying the whole-model requirements to all stages. FP32 and BF16 here are the numerical type conditions of the corresponding stages.
 
-逐阶段有候选仍不代表整条路径可以执行：阶段之间还要传输数据、转换格式并同步，合并放在同一设备上的对象也可能同时驻留。CPU 计算器只筛选声明匹配的设备，实际放置要进一步验证交接与联合资源预算。
+A candidate existing for each stage still does not mean the entire path can execute: data must also be transferred, formats converted, and synchronization performed between stages, and objects merged onto the same device may also reside at the same time. The CPU calculator only screens devices whose declarations match; actual placement needs further verification of the handoff and the joint resource budget.
 
-| 阶段 | 示例要求 | 需要继续检查 |
+| Stage | Example requirements | What needs further checking |
 |:---|:---|:---|
-| 预处理 | 0.5 GB、Python、tokenize | 主机内存、输入协议与准备时间 |
-| 生成 | 40 GB、BF16、vLLM、prefill/decode/attention | 加载、状态容量与实际执行路径 |
-| 阶段交接 | 由所选设备组合决定 | 数据格式、传输、同步与联合驻留 |
+| Preprocessing | 0.5 GB, Python, tokenize | Host memory, input protocol, and preparation time |
+| Generation | 40 GB, BF16, vLLM, prefill/decode/attention | Loading, state capacity, and the actual execution path |
+| Stage handoff | Determined by the chosen device combination | Data format, transfer, synchronization, and joint residency |
 
 
 ```python
 def assign_stages(profiles, plan):
-    """按显式阶段配置逐项筛选声明，不决定实际放置或验证交接。"""
+    """Screen the declarations item by item according to the explicit stage configuration; do not decide the actual placement or verify the handoff."""
     if not isinstance(plan.get("stages"), dict) or not plan["stages"]:
         raise ValueError('必须提供非空阶段需求')
     stage_trace = {}
@@ -172,24 +173,24 @@ assert STAGE_TRACE["generate"]["candidate_devices"] == ["gpu"]
 
 ```
 
-## Q4：进入性能测量前还缺哪些检查？
+## Q4: What checks are still missing before entering performance measurement?
 
-先检查必需阶段是否齐全、有无声明匹配的设备，再确认质量和整条执行路径的功能测试。路径测试应覆盖加载、阶段交接与输出，不能要求“已有性能基准”才允许开始性能测量，否则会形成循环前提。
+First check whether the required stages are complete and whether any device has a matching declaration, then confirm quality and functional tests of the entire execution path. The path test should cover loading, stage handoff, and output, and must not require that "a performance benchmark already exists" before performance measurement is allowed to start, otherwise it creates a circular premise.
 
-下面的布尔值表示外部已经完成的检查；示例调用只是构造状态，不会生成真实运行证据。满足前提后才进入固定工作负载下的计时、吞吐与稳定性比较。
+The boolean values below represent checks already completed externally; the example calls only construct states and do not produce real execution evidence. Only after the premises are met do we enter the comparison of timing, throughput, and stability under a fixed workload.
 
-| 条件 | 本例状态 | 下一步 |
+| Condition | State in this example | Next step |
 |:---|:---|:---|
-| 阶段缺失或没有声明匹配的设备 | blocked | 修正需求与设备声明 |
-| 质量检查未通过 | blocked | 检查模型、模板与数值结果 |
-| 整条路径尚未完成真实功能测试 | needs_runtime_check | 核对加载、交接和输出 |
-| 必要检查已声明通过 | benchmark_ready | 开始性能测量，不直接作部署采用判断 |
+| Stage missing or no device with a matching declaration | blocked | Fix the requirements and device declarations |
+| Quality check failed | blocked | Check the model, template, and numerical results |
+| The entire path has not passed a real functional test | needs_runtime_check | Verify loading, handoff, and output |
+| Necessary checks declared as passed | benchmark_ready | Start performance measurement; do not directly make a deployment adoption decision |
 
 
 ```python
 def benchmark_admission(stage_trace, required_stages, quality_gate_passed,
                         runtime_smoke_passed):
-    """根据给定检查结果判断是否可进入计时，不验证证据真实性。"""
+    """Decide whether timing may start based on the given check results; do not verify the authenticity of the evidence."""
     if (type(quality_gate_passed) is not bool
             or type(runtime_smoke_passed) is not bool):
         raise ValueError('质量与路径检查结果必须是布尔值')
@@ -216,8 +217,8 @@ assert benchmark_admission({}, required_stages, True, True)["status"] == "blocke
 
 ```
 
-## 相关阅读
+## Related Reading
 
-- [部署与异构系统专题](../topic_discussion/deployment_heterogeneous/intro.md)
-- [通信与并行专题](../topic_discussion/communication_parallelism/intro.md)
-- [Part 02 · 72 多模型部署比较](../02_PyTorch_Algorithms/72_Multi_Model_Deployment_Comparison.md)
+- [Deployment and Heterogeneous Systems topic](../topic_discussion/deployment_heterogeneous/intro.md)
+- [Communication and Parallelism topic](../topic_discussion/communication_parallelism/intro.md)
+- [Part 02 · 72 Multi-Model Deployment Comparison](../02_PyTorch_Algorithms/72_Multi_Model_Deployment_Comparison.md)

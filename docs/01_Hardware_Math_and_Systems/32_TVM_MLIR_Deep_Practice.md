@@ -1,6 +1,6 @@
 # 32. TVM MLIR Deep Practice | TVM / MLIR 编译链路
 
-**难度：** Hard | **环境：** CPU-first | **标签：** `编译系统`, `TVM/MLIR`, `逐层降级` | **目标人群：** 编译与系统入门者
+**Difficulty:** Hard | **Environment:** CPU-first | **Tags:** `compiler systems`, `TVM/MLIR`, `progressive lowering` | **Audience:** compiler and systems beginners
 
 > 🚀 **云端运行环境**
 >
@@ -12,40 +12,38 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-一条矩阵乘计算即使形状正确，也可能因目标不支持所需精度，或分块超出资源预算而无法执行。编译过程需要把符号维度、算子支持和分块计划逐项落实，前一步留下的信息决定后一步能检查什么。
+Even with the correct shapes, a matrix multiply computation may fail to execute because the target does not support the required precision, or because the tiling exceeds the resource budget. Compilation needs to establish the symbolic dimensions, operator support, and tiling plan item by item, and the information left by each step determines what the next step can check.
 
-本节用 Python 数据结构表示这些阶段，核对形状绑定、目标支持、调度预算与最终计划，不调用 TVM 或 MLIR。完成后，你应能定位计划在哪一步失败，并区分计划生成与实际代码执行；真实实现进入算子优化，运行时兼容性继续在硬件适配组核对。
+This section uses Python data structures to represent these stages and checks shape binding, target support, scheduling budgets, and the final plan, without calling TVM or MLIR. After completing it, you should be able to locate the step at which a plan fails and distinguish plan generation from actual code execution; real implementations move on to operator optimization, and runtime compatibility continues to be checked in the hardware adaptation group.
 
-**关键词：** 中间表示、形状绑定、算子合法化、分块调度
+**Keywords:** intermediate representation, shape binding, operator legalization, tiling schedule
 
-![多层 IR、Pass 与代码生成](../public/01_Hardware_Math_and_Systems/32_ir_pass_codegen.svg)
+![Multi-level IR, Passes, and code generation](../public/01_Hardware_Math_and_Systems/32_ir_pass_codegen.svg)
 
 ---
-## 前置阅读
+## Prerequisite Reading
 
-**导语：** 先准备图级优化、融合和动态形状约束，再把它们放入完整编译链。
+**Overview:** First get ready the graph-level optimization, fusion, and dynamic shape constraints, then place them into the complete compilation chain.
 
-- [09. AI Compilers and Graph Optimization | AI 编译器与计算图优化](./09_AI_Compilers_and_Graph_Optimization.md)
-- [19. Operator Fusion Introduction | 算子融合导论](./19_Operator_Fusion_Introduction.md)
-- [30. Dynamic Shape Handling | 动态 Shape 处理](./30_Dynamic_Shape_Handling.md)
+- [09. AI Compilers and Graph Optimization](./09_AI_Compilers_and_Graph_Optimization.md)
+- [19. Operator Fusion Introduction](./19_Operator_Fusion_Introduction.md)
+- [30. Dynamic Shape Handling](./30_Dynamic_Shape_Handling.md)
 
-## Q1：每次中间表示变换需要检查什么？
+## Q1: What does each intermediate representation transformation need to check?
 
-形状特化把符号维度绑定为具体大小；合法化检查当前算子和数据类型能否进入给定目标；调度选择分块并检查边界；最后生成目标计划。任一阶段的前提不满足，都应停止，而不是只写入一个“成功”标记。
+Shape specialization binds symbolic dimensions to concrete sizes; legalization checks whether the current operators and data types can enter the given target; scheduling selects the tiling and checks the boundaries; finally, the target plan is generated. If the premises of any stage are not met, the pipeline should stop rather than just writing a "success" marker.
 
-下面只建模一种三维矩阵乘法表示，形状按 $(M,N,K)$ 记录。假定目标支持 FP16，并采用无需尾块屏蔽的整除分块；这是一组教学规则，不代表 TVM、MLIR 或 CUDA 的通用限制。
-
-### Q1 对照验证：完成形状绑定后再建立目标计划
-
+The following models only one three-dimensional matrix multiplication representation, recording the shape as $(M,N,K)$. Assume the target supports FP16 and adopts evenly divisible tiling that requires no tail-block masking; these are a set of teaching rules and do not represent general limitations of TVM, MLIR, or CUDA.
+### Q1 Contrast Verification: Build the target plan only after completing shape binding
 
 ```python
 source_ir = {'op': 'matmul', 'dtype': 'fp16', 'shape': ('B', 4096, 4096)}
 
 
 def specialize_shape(graph, bindings=None):
-    """复制输入并绑定全部符号维度；本例只接收正整数维度。"""
+    """Copy the input and bind all symbolic dimensions; this example only accepts positive integer dimensions."""
     bindings = {'B': 8} if bindings is None else bindings
     shape = tuple(bindings.get(dim, dim) for dim in graph['shape'])
     if len(shape) != 3 or any(type(dim) is not int or dim <= 0 for dim in shape):
@@ -54,7 +52,7 @@ def specialize_shape(graph, bindings=None):
 
 
 def legalize_ops(graph):
-    """检查示例目标的一种算子和数据类型，不调用真实后端。"""
+    """Check one operator and data type of the example target without calling a real backend."""
     if not graph.get('shape_specialized'):
         raise ValueError('先完成形状绑定')
     if graph['op'] != 'matmul' or graph['dtype'] != 'fp16':
@@ -63,7 +61,7 @@ def legalize_ops(graph):
 
 
 def select_schedule(graph):
-    """检查本例整除分块，明确覆盖 M、N、K 三个维度。"""
+    """Check the evenly divisible tiling of this example, explicitly covering the three dimensions M, N, and K."""
     if not graph.get('legalized'):
         raise ValueError('先完成算子合法化')
     shape = graph['shape']
@@ -79,13 +77,13 @@ def select_schedule(graph):
 
 
 def build_backend_plan(graph):
-    """生成 Python 目标计划；不产生可执行代码或编译成功证据。"""
+    """Generate a Python target plan; it does not produce executable code or evidence of successful compilation."""
     if not all(graph.get(key) is True for key in
                ('shape_specialized', 'legalized', 'schedule_valid')):
         raise ValueError('缺少形状、合法化或调度前提')
     if graph['op'] != 'example.matmul' or graph['dtype'] != 'fp16':
         raise ValueError('目标算子或数据类型不匹配')
-    # 再检查调度，避免修改形状后沿用旧的成功标记。
+    # Re-check the schedule to avoid reusing an old success marker after the shape is modified.
     checked = select_schedule(graph)
     if graph.get('schedule') != checked['schedule']:
         raise ValueError('计划中的调度与本例规则不一致')
@@ -103,14 +101,12 @@ assert ir['shape'] == (8, 4096, 4096)
 
 ```
 
-## Q2：怎样先排除不可行调度，再比较时间？
+## Q2: How do you first rule out infeasible schedules, then compare times?
 
-分块影响数据复用与资源用量。先按当前问题的形状、共享内存和 Warp 预算排除不可行项，再比较剩余候选的时间；如果没有可行项，应报告空结果，而不是强行选出一个方案。
+Tiling affects data reuse and resource usage. First rule out infeasible items according to the current problem's shape, shared memory, and warp budgets, then compare the times of the remaining candidates; if there is no feasible item, report an empty result instead of forcing a choice.
 
-下面的延迟是构造数据，没有运行自动调优。实际测量还需固定输入、预热、重复次数与正确性条件；不能把此处的排序当作真实 GPU 结论。
-
-### Q2 对照验证：最快记录不一定满足资源条件
-
+The latencies below are constructed data; no autotuning has been run. Actual measurement also requires fixed inputs, warmup, repetition counts, and correctness conditions; the ranking here must not be treated as a real GPU conclusion.
+### Q2 Contrast Verification: The fastest record does not necessarily satisfy the resource conditions
 
 ```python
 import math
@@ -118,7 +114,7 @@ import math
 
 def select_tuning_candidate(candidates, problem_size, shared_memory_limit,
                             max_warps=8):
-    """按给定约束筛选构造记录；空可行集返回 None。"""
+    """Filter the constructed records by the given constraints; return None for an empty feasible set."""
     if any(type(value) is not int or value <= 0
            for value in (problem_size, shared_memory_limit, max_warps)):
         raise ValueError('问题规模与预算必须是正整数')
@@ -149,14 +145,12 @@ print('构造数据筛选：', report)
 
 ```
 
-## Q3：硬件能力检查怎样限制变换？
+## Q3: How does the hardware capability check constrain transformations?
 
-调度与代码生成需要目标具备相应指令、存储和访问能力。下面为每个示例变换声明一组前提，列出目标能力集合中缺少的项目；声明满足也只是局部必要条件，还要检查算子语义、布局、资源与编译支持。
+Scheduling and code generation require the target to have the corresponding instruction, storage, and access capabilities. The following declares a set of premises for each example transformation and lists the items missing from the target capability set; meeting the declaration is only a local necessary condition, and operator semantics, layout, resources, and compiler support still need to be checked.
 
-这些前提是本例的规则，不是通用结论。例如融合未必使用共享内存，布局优化也不总要求连续加载；真实前提由具体变换决定。
-
-### Q3 对照验证：列出示例变换缺少的目标能力
-
+These premises are the rules of this example, not general conclusions. For example, fusion does not necessarily use shared memory, and layout optimization does not always require contiguous loads; the real premises are determined by the specific transformation.
+### Q3 Contrast Verification: List the target capabilities missing for each example transformation
 
 ```python
 compiler_passes = [
@@ -179,18 +173,16 @@ assert next(row for row in decisions if row['pass'] == 'fusion')['declared_capab
 assert next(row for row in decisions if row['pass'] == 'tensor_core_vectorize')['missing'] == ['mma_fp16']
 ```
 
-## Q4：怎样检查阶段顺序与最终目标？
+## Q4: How do you check the stage order and the final target?
 
-阶段检查需要同时回答：前置阶段是否完成、名称是否已知，以及执行链是否达到要求的终点。一个顺序合法但停在形状特化的前缀，不是完整的目标生成流程。
+Stage checking needs to answer at the same time: whether the preceding stages are complete, whether the names are known, and whether the execution chain reaches the required endpoint. A prefix that is legal in order but stops at shape specialization is not a complete target-generation flow.
 
-下面为示例指定一条依赖链，默认要求完成代码生成阶段；只检查前缀时需显式关闭终点要求。示例将重复阶段视为错误，真实编译器可以按设计重复运行某些变换，不能把这项规则推广到所有 Pass 管线。
-
-### Q4 对照验证：区分完整流程、合法前缀与错误顺序
-
+The following designates a dependency chain for the example and by default requires completion of the code generation stage; when checking only a prefix, the endpoint requirement must be explicitly disabled. The example treats duplicate stages as errors; real compilers may run some transformations repeatedly by design, so this rule must not be generalized to all pass pipelines.
+### Q4 Contrast Verification: Distinguish a complete flow, a legal prefix, and an incorrect order
 
 ```python
 def validate_pipeline(pipeline, require_codegen=True):
-    """检查本例阶段依赖与终点，不代表实际编译已经执行。"""
+    """Check the stage dependencies and endpoint of this example; it does not mean actual compilation has been executed."""
     dependencies = {
         'shape_specialize': set(),
         'legalize_ops': {'shape_specialize'},
@@ -229,11 +221,11 @@ print('错误顺序：', validate_pipeline(invalid_pipeline))
 
 ```
 
-## 相关阅读
+## Related Reading
 
-**导语：** 继续把生成路径交给具体内核和运行时验证。
+**Overview:** Continue by handing the generation path to concrete kernels and the runtime for verification.
 
-- [05. Triton 矩阵乘法与自动调优](../03_Triton_Kernels/05_Triton_GEMM_Tutorial.md)
-- [09. Triton 自动调优与基准测量](../03_Triton_Kernels/09_Triton_Autotune_and_Profiling.md)
-- [34. Heterogeneous Accelerators and Runtime Constraints | 异构加速器与运行时约束](./34_Heterogeneous_Accelerators_and_Runtime_Constraints.md)
+- [05. Triton GEMM: Tiling and Accumulation](../03_Triton_Kernels/05_Triton_GEMM_Tutorial.md)
+- [09. Triton Autotuning and Benchmarking](../03_Triton_Kernels/09_Triton_Autotune_and_Profiling.md)
+- [34. Heterogeneous Accelerators and Runtime Constraints](./34_Heterogeneous_Accelerators_and_Runtime_Constraints.md)
 ---

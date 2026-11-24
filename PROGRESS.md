@@ -1,8 +1,8 @@
 # PROGRESS.md — English Translation Progress
 
 > **Last updated:** 2026-11-24  
-> **Overall:** 59 / 472 source files translated (12.5%)  
-> **Current focus:** M2 Part 01 — `01-P`, `01-A`, and `01-B` are complete; next is `01-C` (groups 1E + 1F notebooks)
+> **Overall:** 67 / 472 source files translated (14.2%)  
+> **Current focus:** M2 Part 01 is complete; next is M3 Part 02 — start with batch `02-P` (prose and navigation)
 
 This file is the single source of truth for translation status. Update it
 after every file and every batch. Do not delete completed rows.
@@ -24,7 +24,7 @@ after every file and every batch. Do not delete completed rows.
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | M0 | Bootstrap and dry run | 0 | 0 | 0 | 0 | 0 | ✅ |
 | M1 | Part 00 — Prerequisites | 26 | 26 | 0 | 0 | 0 | 100% |
-| M2 | Part 01 — Hardware, Math, and Systems | 41 | 33 | 0 | 0 | 8 | 80.5% |
+| M2 | Part 01 — Hardware, Math, and Systems | 41 | 41 | 0 | 0 | 0 | 100% |
 | M3 | Part 02 — PyTorch Algorithms | 136 | 0 | 0 | 0 | 136 | 0% |
 | M4 | Part 03 — Triton Kernels | 26 | 0 | 0 | 0 | 26 | 0% |
 | M5 | Part 04 — CUDA and System Optimization | 25 | 0 | 0 | 0 | 25 | 0% |
@@ -34,7 +34,7 @@ after every file and every batch. Do not delete completed rows.
 | M9 | Docs-only pages | 14 | 0 | 0 | 0 | 14 | 0% |
 | M10 | Ancillary development and environment docs (optional) | 5 | 0 | 0 | 0 | 5 | 0% |
 | M11 | Regeneration and final QA | 0 | 0 | 0 | 0 | 0 | — |
-| **Total** | | **472** | **59** | **0** | **0** | **413** | **12.5%** |
+| **Total** | | **472** | **67** | **0** | **0** | **405** | **14.2%** |
 
 Update the counts as you go. A file counts as “Translated” only when it
 meets the definition of done in `AGENTS.md` §13. “Reviewed” means a second
@@ -42,12 +42,12 @@ agent checked it and confirmed the same criteria.
 
 ## Current focus
 
-**`01-P`, `01-A`, and `01-B` are complete.** The Part 01 prose pages and the 26 group 1A–1D notebooks are translated and mirrored.
+**M2 Part 01 is complete.** All 41 Part 01 files (7 prose pages and 34 notebooks) are translated, mirrored, and checked.
 
 Next focus:
 
-- Translate batch `01-C` (groups 1E + 1F, 8 notebooks: compilers, fusion, dynamic shapes, accelerators, MIG, and TCO) and close out M2.
-- Then run the Part 01 checks and full Part 01 mirror rebuild.
+- Start M3 Part 02 with batch `02-P` (11 prose/navigation pages: `intro.md` and `2_1.md`–`2_10.md`).
+- Then proceed through the Part 02 notebook batches `02-1` onward.
 
 ### M0 dry-run notes
 
@@ -153,14 +153,14 @@ notes. Append `· reviewed`, `· blocked: reason`, or a short note as needed.
 
 #### 01-C — Groups 1E + 1F (8 files, 10,261 CJK)
 
-- [ ] `01_Hardware_Math_and_Systems/09_AI_Compilers_and_Graph_Optimization.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/32_TVM_MLIR_Deep_Practice.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/19_Operator_Fusion_Introduction.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/30_Dynamic_Shape_Handling.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/10_Domestic_AI_Chips_Overview.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/34_Heterogeneous_Accelerators_and_Runtime_Constraints.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/31_GPU_Virtualization_and_MIG.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/33_TCO_and_Cost_Model.ipynb`
+- [x] `01_Hardware_Math_and_Systems/09_AI_Compilers_and_Graph_Optimization.ipynb`
+- [x] `01_Hardware_Math_and_Systems/32_TVM_MLIR_Deep_Practice.ipynb`
+- [x] `01_Hardware_Math_and_Systems/19_Operator_Fusion_Introduction.ipynb`
+- [x] `01_Hardware_Math_and_Systems/30_Dynamic_Shape_Handling.ipynb`
+- [x] `01_Hardware_Math_and_Systems/10_Domestic_AI_Chips_Overview.ipynb`
+- [x] `01_Hardware_Math_and_Systems/34_Heterogeneous_Accelerators_and_Runtime_Constraints.ipynb`
+- [x] `01_Hardware_Math_and_Systems/31_GPU_Virtualization_and_MIG.ipynb`
+- [x] `01_Hardware_Math_and_Systems/33_TCO_and_Cost_Model.ipynb`
 
 ### M3 — Part 02 — PyTorch Algorithms (136 files, 413,874 CJK)
 
@@ -708,6 +708,7 @@ notes. Append `· reviewed`, `· blocked: reason`, or a short note as needed.
 | 2026-11-23 | OpenCode | M2 `01-P` (intro, 1A–1F) | 7 | Structure diff, residual-CJK, mirror check, chapter links | Zero residual CJK; heading levels, table column counts, link counts, and line/blank-line counts match the baseline; `1E.md` was Chinese-only and received an English H1 and headings; no inbound heading anchors existed |
 | 2026-11-24 | OpenCode | M2 `01-A` (groups 1A + 1B, 13 notebooks) | 13 | Structure diff, AST (docstrings normalized), cell metadata/outputs, comment/docstring CJK scan, mirror check, chapter links | 0 CJK in markdown prose beyond the numbered H1 subtitles and 0 in code comments/docstrings; heading levels, table column counts, and link/image targets match the baseline; code-cell dict values that are displayed as data were left in Chinese per the string-literal policy; no notebook outputs changed; mirrors rebuilt for the 13 notebooks |
 | 2026-11-24 | OpenCode | M2 `01-B` (groups 1C + 1D, 13 notebooks) | 13 | Structure diff, AST (docstrings normalized), cell metadata/outputs, comment/docstring CJK scan, `json.tool` + `nbformat.validate` on all 13, mirror check, chapter links | 0 CJK in markdown prose beyond the numbered H1 subtitles and 0 in code comments/docstrings; heading levels, table column counts, and link/image targets match the baseline; remaining code CJK is print/assert/trade-off label strings plus expert-case names, left unchanged per the string-literal policy; no notebook outputs changed; mirrors rebuilt for the 13 notebooks; mirror rebuild also rewrote three untranslated mirrors (31/33/34) with generator-only whitespace noise, which was reverted |
+| 2026-11-24 | OpenCode | M2 `01-C` (groups 1E + 1F, 8 notebooks) + M2 close-out | 8 | Structure diff, AST (docstrings normalized), cell metadata/outputs, comment/docstring CJK scan, `json.tool` + `nbformat.validate` on all 8, full Part 01 mirror rebuild, mirror and chapter-link checks | 0 CJK in markdown prose beyond the numbered H1 subtitles and 0 in code comments/docstrings; heading levels, table column counts, and link/image targets match the baseline; remaining code CJK is `raise ValueError`/`print` string literals plus dict values, left unchanged per the string-literal policy; no notebook outputs changed; `convert_notebook.py --dir` + `sync_docs_navigation.py --part` regenerated only the 8 changed mirrors; `check_source_docs_mirror.py` and `check_chapter_links.py` pass; M2 closed at 41/41 |
 
 ## Roadblocks and quirks
 
@@ -758,6 +759,11 @@ Add new terms discovered during translation. Later, merge them into
 | 线程槽 / 逻辑元素槽 | thread slot / logical element slot | `01_Hardware_Math_and_Systems/15_CUDA_Execution_Model`, `18_Triton_Block_Model` | Slots are not physical threads or lanes; kept distinct from occupancy |
 | 容量候选 / 硬门槛 | capacity candidate / hard gate | `01_Hardware_Math_and_Systems/26_Parallel_Strategy_Decision_Framework` | Constraint-first screening before benchmarking |
 | 可见性 | visibility | `01_Hardware_Math_and_Systems/16_Warp_Block_SharedMemory_Basics` | Shared-memory write/read ordering conditions |
+| 守卫 | guard | `01_Hardware_Math_and_Systems/30_Dynamic_Shape_Handling` | Applicability check on shapes, strides, types, or program state; a guard failure is not a compile error |
+| 图中断 | graph break | `01_Hardware_Math_and_Systems/30_Dynamic_Shape_Handling` | Capture cannot continue across part of the program; distinct from a shape-cache miss |
+| 算子合法化 | operator legalization | `01_Hardware_Math_and_Systems/32_TVM_MLIR_Deep_Practice` | Stage that checks whether operators and dtypes can enter the target |
+| 逐层降级 | progressive lowering | `01_Hardware_Math_and_Systems/32_TVM_MLIR_Deep_Practice` | Successive IR-level lowering along the compile chain |
+| 可执行契约 | executable contract | `01_Hardware_Math_and_Systems/34_Heterogeneous_Accelerators_and_Runtime_Constraints` | Declared device/runtime conditions versus actual loading and execution |
 
 ## Content issues
 
@@ -766,7 +772,8 @@ Translate it faithfully anyway; do not fix it.
 
 | File | Issue | Decision / follow-up |
 | --- | --- | --- |
-| — | — | — |
+| `01_Hardware_Math_and_Systems/34_Heterogeneous_Accelerators_and_Runtime_Constraints.ipynb` | Related-reading label reads “09. Distributed Communication Primitives” but links to `04_.../13_Distributed_Communication_Primitives.ipynb` | Translated the label as-is (English half only); numbering mismatch left unfixed |
+| `01_Hardware_Math_and_Systems/32_TVM_MLIR_Deep_Practice.ipynb` | Notebook H1 English half is “TVM / MLIR Compilation Pipeline”, while the generated docs mirror uses “TVM MLIR Deep Practice” (derived from the file name) | Left both as generated; no hand edit of mirrors |
 
 ## How to update this file
 

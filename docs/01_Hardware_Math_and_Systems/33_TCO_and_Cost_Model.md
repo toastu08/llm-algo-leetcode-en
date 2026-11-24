@@ -1,6 +1,6 @@
 # 33. TCO and Cost Model | 算力评估与 TCO 模型
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `系统工程`, `成本评估`, `TCO` | **目标人群：** 硬件约束学习者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `systems engineering`, `cost evaluation`, `TCO` | **Audience:** learners of hardware constraints
 
 > 🚀 **云端运行环境**
 >
@@ -12,36 +12,36 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-两台设备都能运行同一个模型时，采购价更低的一台，未必能以更低成本完成请求。空闲耗电、适配工时、停机与较低的成功处理量，都可能改变最终比较结果。
+When two devices can both run the same model, the one with the lower purchase price may not complete requests at a lower cost. Idle power draw, adaptation labor, downtime, and a lower successful throughput can all change the final comparison.
 
-本节在同一持有期内分别计算采购、繁忙与空闲能耗、运维和迁移成本，再除以成功请求数量。完成后，你应能解释利用率与成功率如何改变单位成本，并区分全额采购支出和折旧分摊；部署与性能比较还需使用对应工作负载的实际数据。
+This section computes purchase, busy and idle energy, operations, and migration costs separately within the same holding period, then divides by the number of successful requests. After completing it, you should be able to explain how utilization and success rate change the unit cost, and distinguish full purchase spending from depreciation allocation; deployment and performance comparisons still need actual data from the corresponding workloads.
 
-**关键词：** 总拥有成本（TCO）、单位成本、能耗
+**Keywords:** total cost of ownership (TCO), unit cost, energy consumption
 
-![总拥有成本决策链](../public/01_Hardware_Math_and_Systems/33_tco_decision_chain.svg)
+![Total cost of ownership decision chain](../public/01_Hardware_Math_and_Systems/33_tco_decision_chain.svg)
 
 ---
-## 前置阅读
+## Prerequisite Reading
 
-**导语：** 先保留通过可执行性检查的候选，再比较持有期内的完整成本。
+**Overview:** First retain the candidates that passed the executability check, then compare the full cost within the holding period.
 
-- [10. AI Chips Overview and Alternatives | 算力现状与替代方案](./10_Domestic_AI_Chips_Overview.md)
-- [34. Heterogeneous Accelerators and Runtime Constraints | 异构加速器与运行时约束](./34_Heterogeneous_Accelerators_and_Runtime_Constraints.md)
+- [10. AI Chips Overview and Alternatives](./10_Domestic_AI_Chips_Overview.md)
+- [34. Heterogeneous Accelerators and Runtime Constraints](./34_Heterogeneous_Accelerators_and_Runtime_Constraints.md)
 
-## Q1：TCO 为什么比单卡报价更重要？
+## Q1: Why is TCO more important than the per-card price?
 
 
-TCO 看的是总拥有成本，不只是买卡的钱。
+TCO looks at the total cost of ownership, not just the money spent on the card.
 
-它会把采购、能耗、运维、迁移、停机风险和替换成本都放进来。对于长期运行的系统来说，单卡便宜不一定代表整体便宜，因为后续的电费、维护和迁移可能更贵。
+It takes purchase, energy, operations, migration, downtime risk, and replacement cost into account. For a system that runs for a long time, a cheaper card does not necessarily mean a cheaper overall solution, because the subsequent electricity, maintenance, and migration may be more expensive.
 
-所以真正要比较的是一段时间内谁更能稳定地把业务跑起来。
+So what really needs to be compared is who can keep the business running more stably over a period of time.
 
-### Q1 成本计算：分别计算繁忙与空闲能耗
+### Q1 Cost Calculation: Compute busy and idle energy separately
 
-统一货币单位，以每月 30 天、设备整段持有期通电为假设。利用率表示繁忙时间比例；空闲时仍按空闲功率计电费。示例价格、功率与利用率均为构造输入，不是设备报价或实测结果。
+Use a unified currency unit, assuming 30 days per month and continuous power for the entire device holding period. Utilization represents the fraction of busy time; power is still billed at the idle power draw during idle time. The example prices, power, and utilization are all constructed inputs, not device quotes or measured results.
 
 
 ```python
@@ -51,7 +51,7 @@ import math
 def tco_ledger(purchase_cost, power_kw, electricity_per_kwh,
                ops_cost_per_month, migration_cost, months, utilization,
                idle_power_kw=0.0):
-    """按全额采购现金支出与繁忙/空闲能耗建立简化持有期成本。"""
+    """Build a simplified holding-period cost from full purchase cash spending and busy/idle energy."""
     values = (purchase_cost, power_kw, electricity_per_kwh, ops_cost_per_month,
               migration_cost, months, utilization, idle_power_kw)
     if any(not math.isfinite(value) or value < 0 for value in values):
@@ -84,23 +84,23 @@ print('B 构造成本：', gpu_b)
 
 ```
 
-## Q2：为什么迁移成本和风险要算进模型里？
+## Q2: Why should migration cost and risk be included in the model?
 
 
-硬件切换不只是换设备，还会带来软件适配、调试、重构和性能回归风险。
+Switching hardware is not just replacing the device; it also brings software adaptation, debugging, refactoring, and performance regression risks.
 
-如果迁移需要重新适配编译器、kernel、通信库或部署流程，那这些工作本身就是成本的一部分。
+If migration requires re-adapting the compiler, kernels, communication libraries, or deployment flow, that work is itself part of the cost.
 
-所以 TCO 不是财务问题和技术问题的二选一，而是把两者放进同一个判断框架。
+So TCO is not a choice between a financial problem and a technical problem, but puts both into the same judgment framework.
 
-### Q2 风险计算：工时成本与条件回滚损失
+### Q2 Risk Calculation: Labor cost and conditional rollback loss
 
-工程与验证工时按同一费率计费；停机时长在本例中仅指发生回滚时的额外停机，因此乘以回滚概率。计划内停机或其他损失需另列，不能也乘以该概率而漏算。
+Engineering and validation hours are billed at the same rate; downtime in this example refers only to the extra downtime when a rollback occurs, so it is multiplied by the rollback probability. Planned downtime or other losses need to be listed separately and must not be omitted by also multiplying them by this probability.
 
 
 ```python
 def migration_cost(engineering_hours, hourly_rate, validation_hours, downtime_hours, downtime_cost_per_hour, rollback_probability):
-    """计算迁移工程成本和按回滚概率加权的停机风险成本。"""
+    """Compute the migration engineering cost and the downtime risk cost weighted by the rollback probability."""
     if any(not math.isfinite(value) or value < 0 for value in
            (engineering_hours, hourly_rate, validation_hours, downtime_hours,
             downtime_cost_per_hour)):
@@ -118,20 +118,20 @@ print('low risk:', low_risk)
 print('high risk:', high_risk)
 ```
 
-## Q3：每百万成功请求的分母怎样计算？
+## Q3: How is the denominator of per-million successful requests computed?
 
-先固定成本持有期，再估算期间完成的成功请求数。下面的请求率是服务可用且繁忙时的处理速率，可用率表示可服务时间占比，利用率表示可服务时间内的繁忙比例，成功率表示尝试中完成质量与功能要求的比例；四项相乘得到成功请求总量。
+First fix the cost holding period, then estimate the number of successful requests completed during it. The request rate below is the processing rate when the service is available and busy, availability represents the fraction of time the service can serve, utilization represents the busy fraction within the serviceable time, and the success rate represents the fraction of attempts that meet the quality and functional requirements; multiplying the four gives the total number of successful requests.
 
-如果输入请求率已经按完整日历时间平均，就不能再乘一次可用率与利用率。成功请求数为零时，单位成本未定义，不能报告为零。
+If the input request rate has already been averaged over the full calendar time, it must not be multiplied by availability and utilization again. When the number of successful requests is zero, the unit cost is undefined and must not be reported as zero.
 
-### Q3 单位成本：分开记录可用率、利用率和成功率
+### Q3 Unit Cost: Record availability, utilization, and success rate separately
 
 
 ```python
 def cost_per_million_successful_requests(total_cost, requests_per_second,
                                           availability, months,
                                           utilization=1.0, success_rate=1.0):
-    """请求率按可用且繁忙时间计；分母另计可用率、利用率与成功率。"""
+    """The request rate is measured over available and busy time; the denominator separately accounts for availability, utilization, and success rate."""
     values = (total_cost, requests_per_second, availability, months,
               utilization, success_rate)
     if any(not math.isfinite(value) or value < 0 for value in values):
@@ -157,29 +157,29 @@ print('每百万成功请求的构造成本：', options)
 
 ```
 
-## Q4：为什么扩容节奏和折旧周期也会改变 TCO 结论？
+## Q4: Why do the expansion pace and depreciation cycle also change the TCO conclusion?
 
 
-TCO 不只是“买得起还是用得起”，还取决于你要在多长时间内把这套系统跑满。
+TCO is not just "can you afford to buy it or can you afford to run it"; it also depends on how long you need to run this system at full capacity.
 
-如果扩容太慢，前期买来的算力可能闲置，单位产出成本会被拉高；如果折旧周期太短，硬件还没充分发挥就要更新，账面成本也会迅速上升。
+If expansion is too slow, the compute purchased early may sit idle, driving up the cost per unit of output; if the depreciation cycle is too short, the hardware must be replaced before it is fully utilized, and the book cost will also rise rapidly.
 
-因此真正的成本模型，往往要同时考虑：
-- 初始采购成本；
-- 运行成本；
-- 迁移和切换成本；
-- 扩容与折旧节奏。
+Therefore a real cost model often has to consider at the same time:
+- the initial purchase cost;
+- the operating cost;
+- the migration and switching cost;
+- the expansion and depreciation pace.
 
-把这些变量放在一起看，才更接近真实的技术选型决策。
+Only by looking at these variables together can the decision come closer to real technology selection.
 
-### Q4 利用率对照：区分折旧分摊与采购现金支出
+### Q4 Utilization Contrast: Distinguish depreciation allocation from purchase cash spending
 
-本例按折旧期分摊采购成本，再除以使用小时；运维与迁移成本输入为同一观察期的合计。它与 Q1 的全额采购现金支出是不同口径，不能把两项采购成本相加；示例同样假设每月 30 天。
+This example allocates the purchase cost over the depreciation period, then divides by the hours of use; the operations and migration cost inputs are totals for the same observation period. This is a different measure from the full purchase cash spending in Q1, and the two purchase costs must not be added together; the example also assumes 30 days per month.
 
 
 ```python
 def effective_cost_per_used_hour(purchase_cost, operations_cost, migration_cost, horizon_months, depreciation_months, utilization):
-    """按折旧期分摊采购成本，并以实际使用小时归一化。"""
+    """Allocate the purchase cost over the depreciation period and normalize by the actual hours of use."""
     if any(not math.isfinite(value) or value < 0
            for value in (purchase_cost, operations_cost, migration_cost)):
         raise ValueError('costs must be non-negative')
@@ -202,11 +202,11 @@ print(scenarios)
 
 ```
 
-## 相关阅读
+## Related Reading
 
-**导语：** 把成本结果交给部署与性能专题，与真实工作负载证据一起判断。
+**Overview:** Hand the cost results to the deployment and performance topics and judge them together with real workload evidence.
 
-- [31. GPU Virtualization and MIG | GPU 虚拟化与 MIG](./31_GPU_Virtualization_and_MIG.md)
-- [性能优化专题](../topic_discussion/performance_optimization/intro.md)
-- [部署与异构系统专题](../topic_discussion/deployment_heterogeneous/intro.md)
+- [31. GPU Virtualization and MIG](./31_GPU_Virtualization_and_MIG.md)
+- [Performance Optimization topic](../topic_discussion/performance_optimization/intro.md)
+- [Deployment and Heterogeneous Systems topic](../topic_discussion/deployment_heterogeneous/intro.md)
 ---
