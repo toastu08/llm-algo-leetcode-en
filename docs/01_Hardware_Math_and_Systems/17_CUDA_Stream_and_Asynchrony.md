@@ -1,6 +1,6 @@
 # 17. CUDA Stream and Asynchrony | CUDA Stream 与异步执行
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `算子编程`, `CUDA Stream`, `异步执行` | **目标人群：** 编译与系统入门者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `operator programming`, `CUDA Stream`, `asynchronous execution` | **Audience:** learners starting with compilers and systems
 
 > 🚀 **云端运行环境**
 >
@@ -12,32 +12,35 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-吞吐受限不一定来自单个计算内核过慢，也可能来自拷贝、计算和同步被排成了不必要的串行链。本节从任务依赖出发，解释 Stream 顺序、事件同步和异步提交怎样共同决定可重叠区间。
+A throughput limit does not necessarily come from a single slow compute kernel; it may also come from copies, computation, and synchronization being arranged into an unnecessary serial chain. Starting from task dependencies, this section explains how Stream ordering, event synchronization, and asynchronous submission together determine the overlappable interval.
 
-完成后，你应能区分主机提交顺序、设备执行顺序和真实依赖，并使用时间线判断重叠是否发生、同步是否暴露在关键路径上。
+When you finish, you should be able to distinguish host submission order, device execution order, and real dependencies, and use a timeline to judge whether overlap occurs and whether synchronization is exposed on the critical path.
 
-**关键词：** CUDA Stream、异步执行（asynchrony）、重叠（overlap）
+**Keywords:** CUDA Stream, asynchrony, overlap
 
-![CUDA Stream、依赖与重叠时间线](../public/01_Hardware_Math_and_Systems/17_stream_dependency_overlap.svg)
+![CUDA Stream, dependencies, and the overlap timeline](../public/01_Hardware_Math_and_Systems/17_stream_dependency_overlap.svg)
 
 ---
-## 前置阅读
+## Prerequisite Reading
 
-**导语：** 先理解阶段放置和设备执行顺序，再看 Stream 与 Event 怎样表达异步依赖。
+**Overview:** First understand stage placement and the device execution order, then see how Streams and Events express asynchronous dependencies.
 
-- [07. CPU and GPU Heterogeneous Scheduling | CPU 与 GPU 异构调度](./07_CPU_GPU_Heterogeneous_Scheduling.md)
-- [15. CUDA Execution Model | CUDA 执行模型](./15_CUDA_Execution_Model.md)
-- [Group 1D: Execution Models, Asynchrony and Operator Mapping | 1D: 执行模型、异步调度与算子映射](./1D.md)
+- [07. CPU and GPU Heterogeneous Scheduling](./07_CPU_GPU_Heterogeneous_Scheduling.md)
+- [15. CUDA Execution Model](./15_CUDA_Execution_Model.md)
+- [Group 1D: Execution Models, Asynchrony and Operator Mapping](./1D.md)
 
-## Q1：不同 Stream 中的任务什么时候可以重叠？
 
-同一 Stream 内的任务按顺序执行，不同 Stream 之间还要满足数据依赖与资源条件。只有计算不依赖当前搬运的数据、且设备能同时提供相应资源时，才有机会重叠。例如，下一批输入搬运可以与当前批计算独立；当前批计算则必须等待自身输入就绪。
+## Q1: When can tasks in different Streams overlap?
 
-下面用两个独立阶段说明理想上限：忽略争用和提交开销时，重叠部分取两段时间的较小值，总时间取较大值；末尾同步开销仍串行加入。若计算依赖这次搬运，就使用两段时间之和。
+Tasks within the same Stream execute in order, while tasks in different Streams must also satisfy data dependencies and resource conditions. Only when the computation does not depend on the data currently being transferred, and the device can provide the corresponding resources at the same time, is there a chance to overlap. For example, transferring the input of the next batch can be independent of the computation of the current batch; the computation of the current batch, however, must wait for its own input to be ready.
 
-### Q1小验证：只改变数据依赖，比较完成时间
+The two independent stages below illustrate the ideal upper bound: ignoring contention and submission overhead, the overlapped part takes the smaller of the two durations and the total time takes the larger one; the trailing synchronization overhead is still added serially. If the computation depends on this transfer, use the sum of the two durations.
+
+
+### Q1 mini check: Change only the data dependency and compare the completion time
+
 
 
 ```python
@@ -45,7 +48,7 @@ import math
 
 
 def stream_timeline(copy_ms, compute_ms, sync_ms, independent=True):
-    """估算两阶段时间；independent 表示计算不依赖这次搬运。"""
+    """Estimate the two-stage time; independent means the computation does not depend on this transfer."""
     values = (copy_ms, compute_ms, sync_ms)
     if any(not math.isfinite(value) or value < 0 for value in values):
         raise ValueError('阶段时间必须为有限非负数')
@@ -68,22 +71,25 @@ assert stream_timeline(10, 20, 4)['hidden_ms'] == 10
 assert stream_timeline(10, 20, 4, independent=False)['hidden_ms'] == 0
 assert stream_timeline(0, 20, 4)['speedup'] == 1.0
 
+
 ```
 
-## Q2：具备异步拷贝条件后，为什么还不能直接预测收益？
+## Q2: Once the asynchronous copy conditions hold, why can the gain still not be predicted directly?
 
-对主机与设备搬运，固定页内存是常见的异步拷贝条件之一；要获得重叠，还需要独立数据、合适的队列与可并行资源。任一条件缺失，计算器就不把搬运计入可隐藏时间。
+For host-device transfers, pinned memory is one of the common conditions for asynchronous copies; to obtain overlap you also need independent data, a suitable queue, and parallelizable resources. If any condition is missing, the calculator does not count the transfer as hidden time.
 
-下面把这些条件作为显式输入，先计算理想可隐藏时间，再减去假设的暴露事件开销。开销大于隐藏时间时，净节省为负；这些输入应由实际时间线核实，而非根据 Stream 数量猜测。
+The following takes these conditions as explicit inputs, first computing the ideal hideable time and then subtracting the assumed exposed event overhead. When the overhead is greater than the hidden time, the net saving is negative; these inputs should be verified from the actual timeline rather than guessed from the number of Streams.
 
-### Q2小验证：逐项撤掉重叠条件
+
+### Q2 mini check: Remove the overlap conditions one by one
+
 
 
 ```python
 def overlap_candidate(copy_ms, compute_ms, event_overhead_ms=0.0,
                       pinned_memory=True, independent=True,
                       concurrent_resources=True):
-    """估算给定条件下的重叠空间，不执行异步拷贝。"""
+    """Estimate the overlap space under the given conditions; does not perform asynchronous copies."""
     values = (copy_ms, compute_ms, event_overhead_ms)
     if any(not math.isfinite(value) or value < 0 for value in values):
         raise ValueError('时间必须为有限非负数')
@@ -112,20 +118,23 @@ for condition in ['pinned_memory', 'independent', 'concurrent_resources']:
     assert report['missing_conditions'] == [condition]
 assert overlap_candidate(1, 3, 3)['estimated_net_saved_ms'] == -2
 
+
 ```
 
-## Q3：怎样从暴露时间区分计算、搬运和等待？
+## Q3: How do you distinguish computation, transfer, and waiting from the exposed time?
 
-先把观察窗口划成互不重叠的计算、暴露搬运、暴露同步和空闲区间，再比较各类时间。占比最大的类别只是下一项检查的线索：计算时间长还需要核对计算量与效率，空闲时间长则要继续追查输入、依赖或主机提交。
+First divide the observation window into non-overlapping compute, exposed transfer, exposed synchronization, and idle intervals, then compare the time of each category. The largest category is only a clue for the next check: a long compute time still requires checking the compute volume and efficiency, while a long idle time requires tracing the input, dependencies, or host submission further.
 
-下面只接受已去除重叠的区间长度。不能把多个 Stream 的完整事件时长直接相加，也不能把最长类别直接当成已确认的瓶颈。
+Only interval lengths that already have overlap removed are accepted below. You cannot add up the complete event durations of multiple Streams directly, nor take the longest category directly as a confirmed bottleneck.
 
-### Q3小验证：用互不重叠的时间计算占比
+
+### Q3 mini check: Compute the shares from non-overlapping times
+
 
 
 ```python
 def classify_timeline(kernel_ms, exposed_copy_ms, exposed_sync_ms, idle_ms):
-    """汇总互不重叠的暴露区间；最长类别不等于已确认的瓶颈。"""
+    """Summarize non-overlapping exposed intervals; the longest category is not a confirmed bottleneck."""
     parts = {
         'kernel': kernel_ms,
         'copy': exposed_copy_ms,
@@ -154,14 +163,17 @@ for name, timeline in plans.items():
 
 assert classify_timeline(*plans['sync_longest'])['dominant'] == 'sync'
 
+
 ```
 
-## 继续检查重叠条件
+## Continue checking the overlap conditions
 
-把估算接到真实运行时，分别记录输入就绪、任务提交和设备完成时刻，并注明所用资源。完整依赖链仍需等待，独立任务是否真正重叠要从执行轨迹判断；实际收益则由固定输入下的重复端到端计时核对。
+Connect the estimate to the real runtime: record the input readiness, task submission, and device completion times separately, and note the resources used. A complete dependency chain still has to wait, and whether independent tasks really overlap must be judged from the execution trace; the actual gain is verified by repeated end-to-end timing under fixed inputs.
 
-## 相关阅读
 
-- [29 CUDA Stream 高级调度](./29_CUDA_Stream_Advanced_Scheduling.md)：计算显式依赖与队列顺序共同约束的时间线。
-- [13 性能分析与瓶颈定位](./13_Profiling_and_Bottleneck_Analysis.md)：区分资源上限、低效率和暴露等待。
-- [性能分析：时间线、I/O 与关键路径](../topic_discussion/performance_analysis/03_time_breakdown_and_trace_reading.md)：核对实际执行轨迹中的等待与重叠。
+## Related Reading
+
+- [29 CUDA Stream Advanced Scheduling](./29_CUDA_Stream_Advanced_Scheduling.md): compute timelines jointly constrained by explicit dependencies and queue order.
+- [13 Profiling and Bottleneck Analysis](./13_Profiling_and_Bottleneck_Analysis.md): distinguish resource ceilings, inefficiency, and exposed waiting.
+- [Performance Analysis: Timeline, I/O, and Critical Path](../topic_discussion/performance_analysis/03_time_breakdown_and_trace_reading.md): check waiting and overlap in the actual execution trace.
+

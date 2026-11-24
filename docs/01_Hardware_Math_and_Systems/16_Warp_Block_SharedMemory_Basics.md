@@ -1,6 +1,6 @@
 # 16. Warp Block SharedMemory Basics | Warp、Block 与 Shared Memory 基础
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `算子编程`, `CUDA`, `Shared Memory` | **目标人群：** 编译与系统入门者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `operator programming`, `CUDA`, `Shared Memory` | **Audience:** learners starting with compilers and systems
 
 > 🚀 **云端运行环境**
 >
@@ -12,39 +12,42 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-同一数据被 Block 内多个线程重复使用时，反复从全局内存读取 会产生不必要的外部流量。共享内存把这份数据保留在 Block 内，但同时受到容量和同步正确性的约束。
+When the same data is used repeatedly by multiple threads inside a Block, reading it from global memory again and again produces unnecessary external traffic. Shared memory keeps this data inside the Block, but it is constrained at the same time by capacity and by synchronization correctness.
 
-本节计算单块内的线程槽覆盖比例与复用前后的逻辑读取字节量，再分别检查容量、同步和复用收益。它主要支撑算子优化路线，也为 Triton Tile、融合和片上归约提供访存基础。
+This section computes the thread-slot coverage ratio within a single block and the logical read byte volume before and after reuse, then checks capacity, synchronization, and reuse gain separately. It mainly supports the operator optimization route, and also provides the memory-access foundation for Triton Tiles, fusion, and on-chip reductions.
 
-**关键词：** `CUDA`, `Warp`, `Shared Memory`
+**Keywords:** `CUDA`, `Warp`, `Shared Memory`
 
-![Block 内共享内存复用链](../public/01_Hardware_Math_and_Systems/16_block_shared_memory_reuse.svg)
+![Shared memory reuse chain within a Block](../public/01_Hardware_Math_and_Systems/16_block_shared_memory_reuse.svg)
 
 ---
-## 前置阅读
+## Prerequisite Reading
 
-先区分程序定义的线程块与设备承载它的 SM，再观察块内数据复用。
+First distinguish the thread block defined by the program from the SM that carries it on the device, then observe the data reuse inside the block.
 
-- [15 CUDA 执行模型](./15_CUDA_Execution_Model.md)：网格覆盖、Warp 分组与单块资源限制。
+- [15 CUDA Execution Model](./15_CUDA_Execution_Model.md): grid coverage, Warp grouping, and per-block resource limits.
 
-## Q1：Warp、Block 和 Thread 分别负责什么？
 
-一个 Thread 处理分配给它的元素，同一 Block 的线程共享协作范围，硬件将块内连续线程按 32 个组成 NVIDIA Warp。Warp 中的线程可以因条件不同而暂时不参与同一条指令；不能把“属于同一 Warp”理解成所有内存访问天然同步，也不能把 Warp 数当作物理核心数。
+## Q1: What are Warp, Block, and Thread each responsible for?
 
-例如一个 Block 有 48 个线程时，会占用两个 Warp 的线程槽，第二个 Warp 只有 16 个有效线程。两个这样的 Block 仍各自分成两个 Warp，不会把剩余线程拼成第三个满 Warp。下方计算的是线程槽覆盖比例，不是某个 SM 的实测占用率。
+A Thread handles the elements assigned to it, the threads of the same Block share a collaboration scope, and the hardware groups 32 consecutive threads within a block into an NVIDIA Warp. Threads in a Warp may temporarily not participate in the same instruction because of differing conditions; you cannot understand "belonging to the same Warp" as all memory accesses being naturally synchronized, nor treat the Warp count as the number of physical cores.
 
-共享内存用于同块线程之间复用数据；在本节的普通线程块模型中，其他 Block 不直接使用这块副本。生产者完成写入、消费者读取和下一轮覆盖之间，仍需满足同步与可见性条件。设备代际会改变可用资源和支持机制，但不会把一次启动的全部线程变成一个共享内存协作组。
+For example, when a Block has 48 threads, it occupies the thread slots of two Warps, and the second Warp has only 16 valid threads. Two such Blocks are still each split into two Warps, and the remaining threads are not stitched into a third full Warp. What is computed below is the thread-slot coverage ratio, not the measured occupancy of some SM.
 
-### Q1 覆盖率计算：单个 Block 的线程怎样装入 Warp
+Shared memory is used to reuse data among threads of the same block; in the ordinary thread-block model of this section, other Blocks do not directly use this copy. Between the producer finishing the write, the consumer reading, and the next round overwriting, the synchronization and visibility conditions must still be satisfied. Device generations change the available resources and supported mechanisms, but they do not turn all threads of one launch into one shared-memory collaboration group.
 
-这里的线程数属于同一个 Block。不同 Block 的尾部线程不会合并到一个 Warp；线程槽覆盖比例也不是设备占用率。
+
+### Q1 coverage calculation: How the threads of a single Block are packed into Warps
+
+The thread count here belongs to the same Block. Tail threads of different Blocks are not merged into one Warp; the thread-slot coverage ratio is also not device occupancy.
+
 
 
 ```python
 def execution_coverage(num_threads, warp_size=32):
-    """计算单个 Block 的 Warp 数、尾 Warp 线程数与槽覆盖比例。"""
+    """Compute the Warp count, the tail-Warp thread count, and the slot coverage ratio of a single Block."""
     if any(type(value) is not int or value <= 0 for value in (num_threads, warp_size)):
         raise ValueError('单块线程数与 Warp 大小必须是正整数')
     warps = (num_threads + warp_size - 1) // warp_size
@@ -61,22 +64,25 @@ for threads in [32, 48, 65]:
     print(execution_coverage(threads))
 assert execution_coverage(48)['last_warp_active_threads'] == 16
 
+
 ```
 
-## Q2：共享内存怎样改变重复读取？
+## Q2: How does shared memory change repeated reads?
 
-同一 Block 多次使用一份数据时，可以把它从全局内存搬入共享内存，让线程重复读取片上副本。这样减少的是重复的全局读取请求；实际 HBM 字节量还取决于原方案的缓存命中情况。搬入、同步和片上容量则是新增成本，需要分别记录。
+When the same Block uses one piece of data multiple times, you can move it from global memory into shared memory and let the threads read the on-chip copy repeatedly. What this reduces is the repeated global read requests; the actual HBM byte volume also depends on the cache hits of the original scheme. The load-in, the synchronization, and the on-chip capacity are new costs and must be recorded separately.
 
-下面比较每次完整重读与每块只搬入一次的逻辑字节量，不把该比例当作加速比。
+Below we compare the logical byte volume of a full re-read each time versus loading once per block, and we do not treat that ratio as a speedup.
 
-### Q2 对照验证：计算整块复用的逻辑读取减少量
 
-暂不计缓存命中，假设各 Block 独立搬入并完整使用数据块。只改变使用次数，观察逻辑全局读取量；这里不测量真实 HBM 流量。
+### Q2 comparison check: Compute the logical read reduction of whole-block reuse
+
+Cache hits are ignored for now; assume each Block loads the data block independently and uses it in full. Only the use count changes, to observe the logical global read volume; the real HBM traffic is not measured here.
+
 
 
 ```python
 def shared_reuse_gain(tile_bytes, reuse_count, blocks):
-    """返回整块读取模型的逻辑字节量及减少比例，不测量 HBM。"""
+    """Return the logical byte volume of the whole-block read model and the reduction ratio; does not measure HBM."""
     if any(type(value) is not int or value <= 0 for value in (tile_bytes, reuse_count, blocks)):
         raise ValueError('数据块字节数、使用次数与块数必须是正整数')
     baseline_global_read_bytes = tile_bytes * reuse_count * blocks
@@ -92,21 +98,24 @@ for reuse_count in [1, 2, 4]:
     print('reuse', reuse_count, '->', shared_reuse_gain(8192, reuse_count, 8))
 assert shared_reuse_gain(8192, 1, 8)['saved_global_read_bytes'] == 0
 
+
 ```
 
-## Q3：容量和同步检查通过后，是否就有复用收益？
+## Q3: Once the capacity and synchronization checks pass, do you already have a reuse gain?
 
-共享内存方案首先需要容纳数据块，并让消费者在数据写入后再读取。两项检查通过，只说明本例的容量与同步前提满足；如果数据只使用一次，方案仍可正确执行，但没有减少逻辑全局读取。实际核函数的同步正确性需要检查控制流和访问关系，不能由一个布尔输入代替验证。
+A shared memory scheme first needs to hold the data block and let consumers read after the data is written. Both checks passing only shows that the capacity and synchronization preconditions of this example are satisfied; if the data is used only once, the scheme can still execute correctly but does not reduce the logical global reads. The synchronization correctness of an actual kernel requires checking the control flow and the access relationships; it cannot be replaced by one boolean input.
 
-### Q3 对照验证：分别检查执行前提与复用量
 
-固定块数和预算，分别构造容量超限、同步条件不满足与没有重复使用的情况。
+### Q3 comparison check: Check the execution preconditions and the reuse volume separately
+
+Fix the block count and the budget, and construct the cases of exceeding capacity, unsatisfied synchronization conditions, and no repeated use separately.
+
 
 
 ```python
 def shared_memory_candidate(tile_bytes, reuse_count, blocks,
                             shared_limit_bytes, synchronization_valid):
-    """检查给定容量和同步前提；同步输入是已知假设，而非验证结果。"""
+    """Check the given capacity and synchronization preconditions; the synchronization input is a known assumption, not a verification result."""
     traffic = shared_reuse_gain(tile_bytes, reuse_count, blocks)
     if type(shared_limit_bytes) is not int or shared_limit_bytes <= 0:
         raise ValueError('共享内存预算必须是正整数字节数')
@@ -137,15 +146,18 @@ print(good)
 print(too_large)
 print(no_reuse)
 
+
 ```
 
-### 从逻辑复用到实际内核
+### From logical reuse to an actual kernel
 
-先判断线程协作与同步是否正确，再检查共享内存容量和逻辑读取减少量。继续扩大分块时，还要结合寄存器、驻留块数与编译结果验证；这些资源关系可在 [SRAM 优化技术](./24_SRAM_Optimization_Techniques.md)继续计算。
+First judge whether the thread collaboration and synchronization are correct, then check the shared memory capacity and the logical read reduction. When continuing to enlarge the tiling, you also need to verify it together with registers, the number of resident blocks, and the compilation results; these resource relationships can be computed further in [SRAM Optimization Techniques](./24_SRAM_Optimization_Techniques.md).
 
-## 相关阅读
 
-先将块内协作接到实际共享内存矩阵乘，再继续计算资源与驻留的取舍。
+## Related Reading
 
-- [Part04·06 共享内存 GEMM](../04_CUDA_and_System_Optimization/06_CUDA_Shared_Memory_Optimization.md)：协作装载、读取及覆盖前的同步。
-- [24 SRAM 优化技术](./24_SRAM_Optimization_Techniques.md)：共享内存、寄存器与驻留块数。
+First connect in-block collaboration to an actual shared memory matrix multiplication, then continue computing the trade-off between resources and residency.
+
+- [Part04·06 Shared Memory GEMM](../04_CUDA_and_System_Optimization/06_CUDA_Shared_Memory_Optimization.md): collaborative loading, reading, and synchronization before overwriting.
+- [24 SRAM Optimization Techniques](./24_SRAM_Optimization_Techniques.md): shared memory, registers, and the number of resident blocks.
+

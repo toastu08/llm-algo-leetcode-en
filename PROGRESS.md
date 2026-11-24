@@ -1,8 +1,8 @@
 # PROGRESS.md — English Translation Progress
 
 > **Last updated:** 2026-11-24  
-> **Overall:** 46 / 472 source files translated (9.7%)  
-> **Current focus:** M2 Part 01 — `01-P` and `01-A` are complete; next is `01-B` (groups 1C + 1D notebooks)
+> **Overall:** 59 / 472 source files translated (12.5%)  
+> **Current focus:** M2 Part 01 — `01-P`, `01-A`, and `01-B` are complete; next is `01-C` (groups 1E + 1F notebooks)
 
 This file is the single source of truth for translation status. Update it
 after every file and every batch. Do not delete completed rows.
@@ -24,7 +24,7 @@ after every file and every batch. Do not delete completed rows.
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | M0 | Bootstrap and dry run | 0 | 0 | 0 | 0 | 0 | ✅ |
 | M1 | Part 00 — Prerequisites | 26 | 26 | 0 | 0 | 0 | 100% |
-| M2 | Part 01 — Hardware, Math, and Systems | 41 | 20 | 0 | 0 | 21 | 48.8% |
+| M2 | Part 01 — Hardware, Math, and Systems | 41 | 33 | 0 | 0 | 8 | 80.5% |
 | M3 | Part 02 — PyTorch Algorithms | 136 | 0 | 0 | 0 | 136 | 0% |
 | M4 | Part 03 — Triton Kernels | 26 | 0 | 0 | 0 | 26 | 0% |
 | M5 | Part 04 — CUDA and System Optimization | 25 | 0 | 0 | 0 | 25 | 0% |
@@ -34,7 +34,7 @@ after every file and every batch. Do not delete completed rows.
 | M9 | Docs-only pages | 14 | 0 | 0 | 0 | 14 | 0% |
 | M10 | Ancillary development and environment docs (optional) | 5 | 0 | 0 | 0 | 5 | 0% |
 | M11 | Regeneration and final QA | 0 | 0 | 0 | 0 | 0 | — |
-| **Total** | | **472** | **46** | **0** | **0** | **426** | **9.7%** |
+| **Total** | | **472** | **59** | **0** | **0** | **413** | **12.5%** |
 
 Update the counts as you go. A file counts as “Translated” only when it
 meets the definition of done in `AGENTS.md` §13. “Reviewed” means a second
@@ -42,12 +42,12 @@ agent checked it and confirmed the same criteria.
 
 ## Current focus
 
-**`01-P` and `01-A` are complete.** The Part 01 prose pages and the 13 group 1A/1B notebooks are translated and mirrored.
+**`01-P`, `01-A`, and `01-B` are complete.** The Part 01 prose pages and the 26 group 1A–1D notebooks are translated and mirrored.
 
 Next focus:
 
-- Translate batch `01-B` (groups 1C + 1D, 13 notebooks: communication, parallel, execution, and asynchrony).
-- Then `01-C`, followed by the Part 01 checks and full mirror rebuild.
+- Translate batch `01-C` (groups 1E + 1F, 8 notebooks: compilers, fusion, dynamic shapes, accelerators, MIG, and TCO) and close out M2.
+- Then run the Part 01 checks and full Part 01 mirror rebuild.
 
 ### M0 dry-run notes
 
@@ -137,19 +137,19 @@ notes. Append `· reviewed`, `· blocked: reason`, or a short note as needed.
 
 #### 01-B — Groups 1C + 1D (13 files, 17,056 CJK)
 
-- [ ] `01_Hardware_Math_and_Systems/05_Communication_Topologies.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/20_NCCL_and_AllReduce_Basics.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/06_VRAM_Calculation_and_ZeRO.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/26_Parallel_Strategy_Decision_Framework.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/27_Communication_Scheduling_Optimization.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/28_Fault_Tolerance_and_Checkpointing.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/07_CPU_GPU_Heterogeneous_Scheduling.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/08_Programming_Models_CUDA_Triton.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/15_CUDA_Execution_Model.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/16_Warp_Block_SharedMemory_Basics.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/18_Triton_Block_Model.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/17_CUDA_Stream_and_Asynchrony.ipynb`
-- [ ] `01_Hardware_Math_and_Systems/29_CUDA_Stream_Advanced_Scheduling.ipynb`
+- [x] `01_Hardware_Math_and_Systems/05_Communication_Topologies.ipynb`
+- [x] `01_Hardware_Math_and_Systems/20_NCCL_and_AllReduce_Basics.ipynb`
+- [x] `01_Hardware_Math_and_Systems/06_VRAM_Calculation_and_ZeRO.ipynb`
+- [x] `01_Hardware_Math_and_Systems/26_Parallel_Strategy_Decision_Framework.ipynb`
+- [x] `01_Hardware_Math_and_Systems/27_Communication_Scheduling_Optimization.ipynb`
+- [x] `01_Hardware_Math_and_Systems/28_Fault_Tolerance_and_Checkpointing.ipynb`
+- [x] `01_Hardware_Math_and_Systems/07_CPU_GPU_Heterogeneous_Scheduling.ipynb`
+- [x] `01_Hardware_Math_and_Systems/08_Programming_Models_CUDA_Triton.ipynb`
+- [x] `01_Hardware_Math_and_Systems/15_CUDA_Execution_Model.ipynb`
+- [x] `01_Hardware_Math_and_Systems/16_Warp_Block_SharedMemory_Basics.ipynb`
+- [x] `01_Hardware_Math_and_Systems/18_Triton_Block_Model.ipynb`
+- [x] `01_Hardware_Math_and_Systems/17_CUDA_Stream_and_Asynchrony.ipynb`
+- [x] `01_Hardware_Math_and_Systems/29_CUDA_Stream_Advanced_Scheduling.ipynb`
 
 #### 01-C — Groups 1E + 1F (8 files, 10,261 CJK)
 
@@ -707,6 +707,7 @@ notes. Append `· reviewed`, `· blocked: reason`, or a short note as needed.
 | 2026-11-23 | OpenCode | M1 `00-2` (11–20) + M1 close-out | 10 | Structure diff, AST (docstrings normalized), cell metadata/outputs, residual-CJK scan, full Part 00 mirror rebuild, mirror and chapter-link checks, `verify.py` | 0 CJK in markdown prose and 0 in code comments/docstrings; remaining code CJK is print/assert literals plus the numbered H1 subtitles; `verify.py` reported 34 passed / 20 failed, all failures being `ModuleNotFoundError: numpy`/`torch` in this environment; out-of-scope mirrors rewritten by `verify.py` were reverted |
 | 2026-11-23 | OpenCode | M2 `01-P` (intro, 1A–1F) | 7 | Structure diff, residual-CJK, mirror check, chapter links | Zero residual CJK; heading levels, table column counts, link counts, and line/blank-line counts match the baseline; `1E.md` was Chinese-only and received an English H1 and headings; no inbound heading anchors existed |
 | 2026-11-24 | OpenCode | M2 `01-A` (groups 1A + 1B, 13 notebooks) | 13 | Structure diff, AST (docstrings normalized), cell metadata/outputs, comment/docstring CJK scan, mirror check, chapter links | 0 CJK in markdown prose beyond the numbered H1 subtitles and 0 in code comments/docstrings; heading levels, table column counts, and link/image targets match the baseline; code-cell dict values that are displayed as data were left in Chinese per the string-literal policy; no notebook outputs changed; mirrors rebuilt for the 13 notebooks |
+| 2026-11-24 | OpenCode | M2 `01-B` (groups 1C + 1D, 13 notebooks) | 13 | Structure diff, AST (docstrings normalized), cell metadata/outputs, comment/docstring CJK scan, `json.tool` + `nbformat.validate` on all 13, mirror check, chapter links | 0 CJK in markdown prose beyond the numbered H1 subtitles and 0 in code comments/docstrings; heading levels, table column counts, and link/image targets match the baseline; remaining code CJK is print/assert/trade-off label strings plus expert-case names, left unchanged per the string-literal policy; no notebook outputs changed; mirrors rebuilt for the 13 notebooks; mirror rebuild also rewrote three untranslated mirrors (31/33/34) with generator-only whitespace noise, which was reverted |
 
 ## Roadblocks and quirks
 
@@ -753,6 +754,10 @@ Add new terms discovered during translation. Later, merge them into
 | 上游梯度 | upstream gradient | `00_Prerequisites/0B.md` | Already in `docs/terminology.md`; used consistently |
 | 梯度边界 | gradient boundary | `00_Prerequisites/08_PyTorch_Grad_Hygiene_and_No_Grad` | Distinguishes `train/eval`, `no_grad`, `detach`, and `requires_grad` |
 | 保序 / 内容守恒 | content conservation | `00_Prerequisites/06_PyTorch_Tensor_Layout_and_Indexing` | Used for reshape/index checks preserving elements |
+| 分桶 | bucketing | `01_Hardware_Math_and_Systems/27_Communication_Scheduling_Optimization` | Gradient bucket size versus launch count in communication scheduling |
+| 线程槽 / 逻辑元素槽 | thread slot / logical element slot | `01_Hardware_Math_and_Systems/15_CUDA_Execution_Model`, `18_Triton_Block_Model` | Slots are not physical threads or lanes; kept distinct from occupancy |
+| 容量候选 / 硬门槛 | capacity candidate / hard gate | `01_Hardware_Math_and_Systems/26_Parallel_Strategy_Decision_Framework` | Constraint-first screening before benchmarking |
+| 可见性 | visibility | `01_Hardware_Math_and_Systems/16_Warp_Block_SharedMemory_Basics` | Shared-memory write/read ordering conditions |
 
 ## Content issues
 

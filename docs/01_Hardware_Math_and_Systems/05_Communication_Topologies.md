@@ -1,6 +1,6 @@
 # 05. Communication Topologies | 通信拓扑与分布式基石
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `并行通信`, `分布式训练`, `通信拓扑` | **目标人群：** 需要理解多卡训练通信代价的学习者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `parallel communication`, `distributed training`, `communication topology` | **Audience:** learners who need to understand the communication cost of multi-GPU training
 
 > 🚀 **云端运行环境**
 >
@@ -12,51 +12,52 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-大模型从单卡扩展到多卡后，每种切分都会引入数据交换。数据并行（DP）、张量并行（TP）和流水线并行（PP）切分的对象不同，因此通信负载和同步位置也不同。
+Once a large model scales from a single GPU to multiple GPUs, every partitioning scheme introduces data exchange. Data parallelism (DP), tensor parallelism (TP), and pipeline parallelism (PP) partition different objects, so their communication loads and synchronization points also differ.
 
-本节建立“切分对象 → 集合通信接口 → 拓扑路径 → 并行组放置”的分类关系。完成后，你应能指出一种切分可能需要的通信原语，估算链路传输下界，并检查高频通信是否被放在合适的拓扑域内；All-Reduce 的算法过程在第 20 节展开，并行候选筛选由第 26 节完成。
+This section establishes the classification chain "partitioned object → collective communication interface → topology path → parallel group placement." When you finish, you should be able to point out which communication primitives a partitioning scheme may require, estimate the lower bound of link transfer, and check whether high-frequency communication is placed in a suitable topology domain; the algorithmic process of All-Reduce is expanded in section 20, and parallel candidate screening is completed in section 26.
 
-**关键词：** `DP`, `TP`, `PP`
+**Keywords:** `DP`, `TP`, `PP`
 
-![本节概念关系](../public/01_Hardware_Math_and_Systems/05_communication_topology_map.svg)
-
----
-
-## 前置阅读
-**导语：** 先复习 GPU 内存层级和设备间连接，再用 DP、TP、PP 的示例回答三个问题：数据放在哪里、哪些数据需要交换、链路带宽如何改变并行收益。
-- [03. GPU Architecture and Memory | GPU 物理架构与内存层级](./03_GPU_Architecture_and_Memory.md)
-- [Group 1C: Communication, Parallelism and Fault Tolerance | 1C: 通信、并行与容错](./1C.md)
+![Concept relationships in this section](../public/01_Hardware_Math_and_Systems/05_communication_topology_map.svg)
 
 ---
-## Q1：DP、TP、PP 分别如何切分数据、张量和层？
+
+## Prerequisite Reading
+**Overview:** First review the GPU memory hierarchy and inter-device connections, then use the DP, TP, and PP examples to answer three questions: where the data is placed, which data must be exchanged, and how link bandwidth changes the parallel payoff.
+- [03. GPU Architecture and Memory](./03_GPU_Architecture_and_Memory.md)
+- [Group 1C: Communication, Parallelism and Fault Tolerance](./1C.md)
+
+---
+## Q1: How do DP, TP, and PP partition data, tensors, and layers respectively?
 
 
-先分别看清数据并行（DP）、张量并行（TP）和流水线并行（PP）各自切分什么，再说明它们组合后为什么称为 3D 并行，最后追踪切分产生的数据交换。
+First look separately at what data parallelism (DP), tensor parallelism (TP), and pipeline parallelism (PP) each partition, then explain why their combination is called 3D parallelism, and finally trace the data exchange produced by the partitioning.
 
-- **DP**：不同卡处理不同数据批次，再同步梯度。
-- **TP**：把单层中的大张量切到多卡上共同计算。
-- **PP**：把不同层切到不同设备或设备组上形成流水线。
+- **DP**: different GPUs process different data batches, then synchronize gradients.
+- **TP**: split the large tensors inside a single layer across GPUs for joint computation.
+- **PP**: place different layers on different devices or device groups to form a pipeline.
 
-将 DP、TP、PP 组合使用时，通常称为 3D 并行。它们的目标不是“越多越好”，而是让模型、算力和通信拓扑能一起匹配。先把切分对象、主要交换的数据和常见通信方式分开看：
+When DP, TP, and PP are used together, this is usually called 3D parallelism. Their goal is not "the more, the better," but to make the model, compute, and communication topology match together. First look separately at the partitioned object, the main data exchanged, and the common communication pattern:
 
-| 并行方式 | 切分对象 | 主要交换的数据 | 常见通信方式 |
+| Parallelism | Partitioned object | Main data exchanged | Common communication pattern |
 | --- | --- | --- | --- |
-| DP | 不同数据批次 | 梯度或参数更新结果 | 常见 All-Reduce |
-| TP | 层内张量或激活 | 局部激活、局部结果 | 可能使用 All-Gather、Reduce-Scatter 或 All-Reduce |
-| PP | 不同层或阶段 | 相邻阶段的激活 | 点到点传输，并伴随流水线等待 |
+| DP | Different data batches | Gradients or parameter update results | Usually All-Reduce |
+| TP | Tensors or activations within a layer | Local activations, local results | May use All-Gather, Reduce-Scatter, or All-Reduce |
+| PP | Different layers or stages | Activations between adjacent stages | Point-to-point transfer, together with pipeline waiting |
 
-### Q1小验证：对照并行维度的切分对象与通信关注点
 
-逐项检查每种并行方式切分什么、需要交换什么，以及对应的通信方式。
+### Q1 mini check: Compare the partitioned object and communication focus of each parallel dimension
+
+Check item by item what each parallelism mode partitions, what it needs to exchange, and the corresponding communication pattern.
 
 ```python
 def three_d_parallel(dp, tp, pp):
-    """组合 DP、TP、PP 三个并行维度，返回切分关系和通信关注点。"""
+    """Combine the three parallelism dimensions DP, TP, and PP, and return the partitioning relationship and communication focus."""
     if any(value <= 0 for value in (dp, tp, pp)):
         raise ValueError('dp、tp、pp 必须为正数')
-    # 先记录三个并行维度，再观察它们组合后的 worker 数量和通信关系。
+    # First record the three parallelism dimensions, then observe the worker count and communication relationship after they are combined.
     return {
         'dp_groups': dp,
         'tp_shards': tp,
@@ -84,24 +85,25 @@ print('3D parallelism = DP × TP × PP')
 
 ```
 
-## Q2：All-Reduce、All-Gather、Reduce-Scatter 分别有什么区别？
+## Q2: What is the difference between All-Reduce, All-Gather, and Reduce-Scatter?
 
 
-这三种集合通信原语的区别，先从每张卡的输入、输出和数据变化看起。下面的形状只是数据流示意；实际耗时还会受到消息大小、world size、拓扑、collective 算法和通信库实现影响。代码只模拟这些输入 / 输出形状，不执行真实 NCCL 通信。
+The difference between these three collective communication primitives starts with the input, the output, and the data changes on each GPU. The shapes below are only a dataflow illustration; the actual cost is also affected by message size, world size, topology, the collective algorithm, and the communication library implementation. The code only simulates these input / output shapes and does not perform real NCCL communication.
 
-| 通信原语 | 每卡输入 | 每卡输出 | 数据变化 | 常见使用场景 |
+| Communication primitive | Input per GPU | Output per GPU | Data change | Common use case |
 | --- | --- | --- | --- | --- |
-| All-Reduce | 局部张量 | 相同形状的归约结果 | 归约后复制到每卡 | DP 梯度同步 |
-| All-Gather | 局部分片 | 拼接后的完整张量 | 收集各卡分片 | TP 激活或参数收集 |
-| Reduce-Scatter | 较大的局部输入 | 归约后的局部结果 | 先归约，再切分 | 分片梯度或参数同步 |
+| All-Reduce | Local tensor | Reduction result of the same shape | Reduce, then copy to every GPU | DP gradient synchronization |
+| All-Gather | Local shards | Concatenated full tensor | Collect the shards from every GPU | TP activation or parameter gathering |
+| Reduce-Scatter | Larger local input | Reduced local result | Reduce first, then split | Sharded gradient or parameter synchronization |
 
-### Q2小验证：通信原语如何改变每张卡看到的数据
 
-先观察“聚合”“收集”“切分再发回”三种数据流。
+### Q2 mini check: How communication primitives change the data each GPU sees
+
+First observe the three dataflows: "aggregate," "gather," and "split then send back."
 
 ```python
 def collective_shape(kind, world_size, local_shape):
-    """返回集合通信的输入 / 输出形状；只模拟数据流，不执行真实通信。"""
+    """Return the input / output shape of a collective communication; only simulate the dataflow, without performing real communication."""
     if world_size <= 0 or not local_shape or any(dim <= 0 for dim in local_shape):
         raise ValueError('world_size 和 local_shape 必须为正数')
     table = {
@@ -128,24 +130,25 @@ else:
     raise AssertionError('未知通信原语应报错')
 ```
 
-## Q3：通信拓扑如何改变通信代价？
+## Q3: How does the communication topology change the communication cost?
 
 
-先区分通信发生在哪里，再比较相同消息大小经过不同链路的理想传输时间。下表中的带宽统一按 Gb/s 表示，只是教学示例，不代表所有 GPU、主板、驱动或网络配置；真实实验应以 `nvidia-smi topo -m`、NCCL 测试或厂商规格为准。
+First distinguish where communication takes place, then compare the ideal transfer time of the same message size over different links. The bandwidth in the table below is uniformly expressed in Gb/s and is only a teaching example; it does not represent every GPU, motherboard, driver, or network configuration. Real experiments should be based on `nvidia-smi topo -m`, NCCL tests, or vendor specifications.
 
-| 通信位置 | 常见链路 | 教学示例带宽（Gb/s） | 主要特点 | 适合承载的通信 |
+| Communication location | Common link | Teaching-example bandwidth (Gb/s) | Main characteristics | Communication it suits |
 | --- | --- | ---: | --- | --- |
-| GPU 机内 | NVLink / NVSwitch | 900 级 | 带宽高、延迟较低 | 高频 TP 或集合通信 |
-| GPU 到 CPU | PCIe | 64 级 | 带宽较低、路径更长 | 参数搬运、低频同步 |
-| 跨节点 | 网络互连 | 以实际集群为准 | 受网络和拓扑影响大 | 低频或可重叠通信 |
+| Within a GPU node | NVLink / NVSwitch | 900 class | High bandwidth, relatively low latency | High-frequency TP or collective communication |
+| GPU to CPU | PCIe | 64 class | Lower bandwidth, longer path | Parameter movement, low-frequency synchronization |
+| Across nodes | Network interconnect | Depends on the actual cluster | Strongly affected by the network and topology | Low-frequency or overlappable communication |
 
-### Q3小验证：相同消息经过不同链路需要多久
 
-在相同消息大小下，比较不同链路的理想传输时间。
+### Q3 mini check: How long the same message takes over different links
+
+Compare the ideal transfer time of different links for the same message size.
 
 ```python
 def path_transfer_lower_bound(payload_mib, links):
-    """按路径最窄链路估算单向传输下界，不包含协议与拥塞开销。"""
+    """Estimate the one-way transfer lower bound from the narrowest link on the path, excluding protocol and congestion overhead."""
     if payload_mib < 0 or not links:
         raise ValueError('payload_mib 不得为负，links 不得为空')
     if any(link['bandwidth_gib_s'] <= 0 for link in links):
@@ -168,26 +171,27 @@ print('机内路径：', intra_node)
 print('跨节点路径：', cross_node)
 ```
 
-## Q4：如何把并行组放到合适的拓扑域？
+## Q4: How do you place parallel groups in suitable topology domains?
 
 
-并行组放置先看通信频率和可用拓扑域。TP、EP 等高频通信通常优先限制在机内；DP 或 PP 可以跨节点，但仍需在后续实验中测量实际集合通信或阶段传输。
+Placement of parallel groups starts with the communication frequency and the available topology domains. High-frequency communication such as TP and EP is usually confined within a node first; DP or PP can span nodes, but the actual collective communication or stage transfer still needs to be measured in later experiments.
 
-| 观察条件 | 可能的风险 | 放置检查 |
+| Observation condition | Possible risk | Placement check |
 | --- | --- | --- |
-| DP 需要跨低带宽链路同步梯度 | 梯度通信拖慢每轮更新 | 登记跨节点带宽和梯度载荷 |
-| TP 需要跨低带宽链路频繁同步 | 集合通信成为瓶颈 | 缩小 TP 范围，优先放在高速互连内 |
-| PP 跨阶段传输激活较多 | 阶段间等待、pipeline bubble | 登记 stage 边界和跨域载荷 |
-| EP 跨节点交换 token | All-to-All 与负载不均叠加 | 优先检查专家组是否可限制在机内 |
-| 只有理想带宽估算 | 无法确认真实部署收益 | 把同一 workload 带入后续系统实验 |
+| DP needs to synchronize gradients across a low-bandwidth link | Gradient communication slows down every update round | Record the cross-node bandwidth and the gradient payload |
+| TP needs frequent synchronization across a low-bandwidth link | Collective communication becomes the bottleneck | Narrow the TP range and place it inside the high-speed interconnect first |
+| PP transfers many activations across stages | Waiting between stages, pipeline bubble | Record the stage boundary and the cross-domain payload |
+| EP exchanges tokens across nodes | All-to-All plus uneven load | First check whether the expert group can be confined within a node |
+| Only an ideal-bandwidth estimate | Cannot confirm the real deployment payoff | Bring the same workload into later system experiments |
 
-### Q4小验证：检查并行组与拓扑域是否匹配
+
+### Q4 mini check: Check whether parallel groups match their topology domains
 
 ```python
 DOMAIN_ORDER = {'cross_node': 1, 'intra_node': 2}
 
 def check_group_placement(groups):
-    """比较并行组要求的拓扑域与实际放置域。"""
+    """Compare the topology domain required by a parallel group with its actual placement domain."""
     reports = []
     for group in groups:
         accepted = DOMAIN_ORDER[group['actual_domain']] >= DOMAIN_ORDER[group['required_domain']]
@@ -213,9 +217,9 @@ for report in reports:
 ```
 
 ---
-## 相关阅读
-本节可以继续接到 NCCL 原语、并行策略选择和通信调度。
-- [20. NCCL and AllReduce Basics | NCCL 与 AllReduce 基础](./20_NCCL_and_AllReduce_Basics.md)
-- [26. Parallel Strategy Decision Framework | 并行策略决策框架](./26_Parallel_Strategy_Decision_Framework.md)
-- [27. Communication Scheduling Optimization | 通信调度优化](./27_Communication_Scheduling_Optimization.md)
+## Related Reading
+This section connects on to NCCL primitives, parallel strategy selection, and communication scheduling.
+- [20. NCCL and AllReduce Basics](./20_NCCL_and_AllReduce_Basics.md)
+- [26. Parallel Strategy Decision Framework](./26_Parallel_Strategy_Decision_Framework.md)
+- [27. Communication Scheduling Optimization](./27_Communication_Scheduling_Optimization.md)
 ---

@@ -1,6 +1,6 @@
 # 06. VRAM Calculation and ZeRO | 显存计算与 ZeRO 优化
 
-**难度：** Hard | **环境：** CPU-first | **标签：** `显存优化`, `显存预算`, `ZeRO` | **目标人群：** 需要建立训练显存账本的学习者
+**Difficulty:** Hard | **Environment:** CPU-first | **Tags:** `memory optimization`, `memory budget`, `ZeRO` | **Audience:** learners who need to build a training memory ledger
 
 > 🚀 **云端运行环境**
 >
@@ -12,50 +12,51 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-训练显存由参数、梯度、优化器状态、激活值、通信缓冲区和临时工作区共同组成。不同状态的复制方式与生命周期不同，因此峰值不能只按参数量估算。
+Training memory is composed of parameters, gradients, optimizer state, activations, communication buffers, and temporary workspace together. Different states have different replication patterns and lifetimes, so the peak cannot be estimated from the parameter count alone.
 
-本节建立“训练状态 → 单卡账本 → DDP 复制 → ZeRO 分片 → 容量预算”的关系。完成后，你应能估算各类状态的理论占用，并判断多卡分片后仍需实测哪些峰值对象。
+This section establishes the relationship "training state → per-GPU ledger → DDP replication → ZeRO sharding → capacity budget." When you finish, you should be able to estimate the theoretical footprint of each kind of state and judge which peak objects still need to be measured after multi-GPU sharding.
 
-**关键词：** `VRAM`, `ZeRO`, `AdamW`
+**Keywords:** `VRAM`, `ZeRO`, `AdamW`
 
-![本节概念关系](../public/01_Hardware_Math_and_Systems/06_vram_zero_map.svg)
-
----
-
-## 前置阅读
-
-**导语：** 先回顾 dtype 的字节数、参数量和通信拓扑，再用同一套参数与 optimizer 假设比较 DDP、ZeRO-1/2/3 的单卡训练状态。
-
-- [Part 01 · 01 数据类型与精度](./01_Data_Types_and_Precision.md)
-- [Part 01 · 02 参数量与 FLOPs](./02_LLM_Params_and_FLOPs.md)
-- [Part 01 · 05 通信拓扑](./05_Communication_Topologies.md)
+![Concept relationships in this section](../public/01_Hardware_Math_and_Systems/06_vram_zero_map.svg)
 
 ---
-## Q1：DDP 下每张卡保存哪些训练状态？
+
+## Prerequisite Reading
+
+**Overview:** First review the byte count of each dtype, the parameter count, and the communication topology, then use the same parameter and optimizer assumptions to compare the per-GPU training state of DDP and ZeRO-1/2/3.
+
+- [Part 01 · 01 Data Types and Precision](./01_Data_Types_and_Precision.md)
+- [Part 01 · 02 Parameter Count and FLOPs](./02_LLM_Params_and_FLOPs.md)
+- [Part 01 · 05 Communication Topology](./05_Communication_Topologies.md)
+
+---
+## Q1: Which training states does each GPU keep under DDP?
 
 
-在 DDP 下，每张卡都保存完整模型、完整梯度和完整优化器状态。下面用 BF16 + Adam、7B 参数作为示例，把每参数字节数和理论占用放在同一张账本表中；Adam 的状态字节数取教学估算值，若实现另存 FP32 master weights、使用不同 optimizer 或改变参数 / 梯度 dtype，必须重新计算。
+Under DDP, every GPU keeps the full model, the full gradients, and the full optimizer state. The example below uses BF16 + Adam with 7B parameters to put the bytes per parameter and the theoretical footprint into a single ledger table; the Adam state byte count is a teaching estimate, and it must be recomputed if an implementation also stores FP32 master weights, uses a different optimizer, or changes the parameter / gradient dtype.
 
-| 训练状态 | 每参数字节数（BF16 + Adam 示例） | 7B 理论占用 | DDP 是否完整驻留 |
+| Training state | Bytes per parameter (BF16 + Adam example) | 7B theoretical footprint | Fully resident under DDP |
 | --- | ---: | ---: | --- |
-| 参数 | 2 bytes | 14 GB | 是 |
-| 梯度 | 2 bytes | 14 GB | 是 |
-| Adam 状态 | 12 bytes | 84 GB | 是 |
-| 合计 | 16 bytes | 112 GB | 是 |
+| Parameters | 2 bytes | 14 GB | Yes |
+| Gradients | 2 bytes | 14 GB | Yes |
+| Adam state | 12 bytes | 84 GB | Yes |
+| Total | 16 bytes | 112 GB | Yes |
 
-这张表只覆盖参数、梯度和 optimizer state，不包含 activation、通信缓冲、临时 workspace、显存碎片或框架的 reserved memory。代码验证还应检查：改变 dtype / optimizer 后账本会变化，且三类状态仍被分别记录。
+This table only covers parameters, gradients, and optimizer state; it does not include activations, communication buffers, temporary workspace, memory fragmentation, or the framework's reserved memory. The code validation should also check that the ledger changes after changing the dtype / optimizer, and that the three kinds of state are still recorded separately.
 
 
-### Q1小验证：拆分 DDP 单卡训练状态账本
+### Q1 mini check: Break down the DDP per-GPU training-state ledger
 
 ```python
 def training_state_breakdown(num_params_b, model_dtype='fp16', optimizer='adam'):
-    """返回十进制 GB 的训练状态理论账本。
+    """Return the theoretical training-state ledger in decimal GB.
 
-    结果只覆盖参数、梯度和优化器状态，不模拟激活、通信缓冲、workspace
-    或 allocator reserve。
+    The result only covers parameters, gradients, and optimizer state; it does
+    not simulate activations, communication buffers, workspace, or allocator
+    reserve.
     """
     if num_params_b < 0:
         raise ValueError('num_params_b must be non-negative')
@@ -74,7 +75,7 @@ def training_state_breakdown(num_params_b, model_dtype='fp16', optimizer='adam')
 
 
 def calculate_ddp_memory(num_params_b, model_dtype='fp16', optimizer='adam'):
-    """返回 DDP 单卡训练状态账本总量；不包含 activation 和 workspace。"""
+    """Return the total DDP per-GPU training-state ledger; activations and workspace are excluded."""
     return training_state_breakdown(num_params_b, model_dtype, optimizer)['training_state_gb']
 
 ledger = training_state_breakdown(7, 'bf16', 'adam')
@@ -108,29 +109,30 @@ def test_calculate_ddp_memory():
 test_calculate_ddp_memory()
 ```
 
-## Q2：ZeRO 如何分摊训练状态？
+## Q2: How does ZeRO share out the training state?
 
 
-ZeRO 的核心思想是把训练状态分摊到多张 GPU 上。先看每个 stage 切分哪些状态，再用 `calculate_zero_memory()` 计算理想单卡占用；这里假设状态可以均匀切分，表格不包含 activation、通信 buffer、workspace、切分粒度和 allocator reserve。
+The core idea of ZeRO is to distribute the training state across multiple GPUs. First look at which states each stage shards, then use `calculate_zero_memory()` to compute the ideal per-GPU footprint; here we assume the state can be sharded evenly, and the table does not include activations, communication buffers, workspace, sharding granularity, or allocator reserve.
 
-| ZeRO 阶段 | 分片状态 | 仍完整驻留的状态 | 理想单卡账本 | 主要代价 |
+| ZeRO stage | Sharded state | State still fully resident | Ideal per-GPU ledger | Main cost |
 | --- | --- | --- | --- | --- |
-| DDP / ZeRO-0 | 无 | 参数、梯度、优化器状态 | 全量状态 | 显存占用高 |
-| ZeRO-1 | 优化器状态 | 参数、梯度 | 参数 + 梯度 + 优化器分片 | 优化器状态通信 |
-| ZeRO-2 | 优化器状态、梯度 | 参数 | 参数 + 梯度分片 + 优化器分片 | 梯度同步和重建 |
-| ZeRO-3 | 参数、梯度、优化器状态 | 无完整训练状态 | 三类状态都按卡分摊 | 参数重建、通信和调度复杂度更高 |
+| DDP / ZeRO-0 | None | Parameters, gradients, optimizer state | Full state | High memory usage |
+| ZeRO-1 | Optimizer state | Parameters, gradients | Parameters + gradients + optimizer shards | Optimizer state communication |
+| ZeRO-2 | Optimizer state, gradients | Parameters | Parameters + gradient shards + optimizer shards | Gradient synchronization and reconstruction |
+| ZeRO-3 | Parameters, gradients, optimizer state | No complete training state | All three kinds of state distributed across GPUs | Parameter reconstruction, communication, and higher scheduling complexity |
 
-选择 stage 时，先问清楚要分摊的是 optimizer state、gradient 还是 parameter；这三个对象的分片范围不同，通信与实现复杂度也不同。
+When choosing a stage, first be clear whether what you want to share out is optimizer state, gradients, or parameters; these three objects have different sharding scopes, and therefore different communication and implementation complexity.
 
 
-### Q2小验证：ZeRO 显存计算
+### Q2 mini check: ZeRO memory calculation
 
 ```python
 def calculate_zero_memory(num_params_b, zero_stage, num_gpus, model_dtype='fp16', optimizer='adam'):
-    """估算理想均匀切分下的单卡训练状态显存。
+    """Estimate the per-GPU training-state memory under ideal even sharding.
 
-    只计算参数、梯度和优化器状态；不包含 activation、通信 buffer、
-    workspace、切分粒度和 allocator reserve，因此不能直接保证不 OOM。
+    Only parameters, gradients, and optimizer state are computed; activations,
+    communication buffers, workspace, sharding granularity, and allocator
+    reserve are excluded, so this cannot directly guarantee that OOM is avoided.
     """
     if num_params_b < 0 or num_gpus <= 0:
         raise ValueError('num_params_b must be non-negative and num_gpus must be positive')
@@ -180,9 +182,9 @@ def test_calculate_zero_memory():
 test_calculate_zero_memory()
 ```
 
-### 账本工具：根据容量反推最大模型规模
+### Ledger tool: Derive the maximum model scale from capacity
 
-这个辅助函数把显存容量、ZeRO stage 和预留系数转换为最大可训练参数量，供后面的策略决策表调用。
+This helper function converts memory capacity, ZeRO stage, and the reserve ratio into the maximum trainable parameter count, for use by the later strategy decision table.
 
 ```python
 def max_trainable_params(gpu_memory_gb, num_gpus, zero_stage, overhead_ratio=0.2, model_dtype='fp16', optimizer='adam'):
@@ -232,14 +234,14 @@ def test_max_trainable_params():
 test_max_trainable_params()
 ```
 
-## Q3：如何把 ZeRO 账本转成容量候选表，并区分理论峰值？
+## Q3: How do you turn the ZeRO ledger into a capacity candidate table and distinguish the theoretical peak?
 
-**问题：** 如果你手上只有 8 张标称 80GB 的 GPU，并且用一个 20% 的教学预留系数近似 activation 和通信开销，如何把 DDP、ZeRO-1、ZeRO-2、ZeRO-3 放到同一张决策表中？
+**Question:** If you only have 8 GPUs with a nominal 80GB each, and you use a 20% teaching reserve ratio to approximate activation and communication overhead, how do you put DDP, ZeRO-1, ZeRO-2, and ZeRO-3 into the same decision table?
 
-请把四种状态布局放在同一个表里比较最大可训练模型规模，并登记通信代价和实现复杂度的定性风险；可以调用前面的账本函数完成规模反推。这里生成的是容量候选证据，完整并行策略筛选在第 26 节完成。
+Please put the four state layouts into the same table to compare the maximum trainable model scale, and record the communication cost and the qualitative risk of implementation complexity; you may call the earlier ledger functions to complete the scale derivation. What is generated here is capacity candidate evidence; the full parallel strategy screening is completed in section 26.
 
 
-把 DDP、ZeRO-1、ZeRO-2、ZeRO-3 放在同一个表里，同时比较单卡训练状态、相对节省、可容纳参数规模，以及通信代价和工程复杂度。这里的“低 / 中 / 高”只是第一轮筛选标签：ZeRO stage 越高，通常需要更多状态分片、重建和同步。表格中的显存和模型规模都是理论账本结果，不等于真实训练可运行上限；最终应把同一模型、dtype、optimizer、batch、seq_len 和 checkpoint 配置带入 73–76 的 GPU 实验，检查 peak allocated、reserved、step time 和 OOM。
+Put DDP, ZeRO-1, ZeRO-2, and ZeRO-3 into the same table and compare the per-GPU training state, the relative saving, the parameter scale that fits, as well as the communication cost and engineering complexity. The "low / medium / high" here are only first-round screening labels: the higher the ZeRO stage, the more state sharding, reconstruction, and synchronization is usually required. The memory and model scale in the table are theoretical ledger results and are not equal to the real runnable training limit; in the end, the same model, dtype, optimizer, batch, seq_len, and checkpoint configuration should be brought into the GPU experiments of 73–76 to check peak allocated, reserved, step time, and OOM.
 
 
 
@@ -248,10 +250,11 @@ gpu_memory = 80
 num_gpus = 8
 overhead_ratio = 0.2
 def compare_zero_strategies(gpu_memory_gb, num_gpus, overhead_ratio=0.2, model_dtype='fp16', optimizer='adam'):
-    """生成 DDP/ZeRO 策略表，比较容量收益与定性通信代价。
+    """Generate the DDP/ZeRO strategy table and compare capacity gains with qualitative communication cost.
 
-    显存数字仍是理论账本；communication_cost 和 engineering_cost
-    是帮助学习者做第一轮筛选的定性标签，不是多卡 benchmark 结果。
+    The memory figures are still a theoretical ledger; communication_cost and
+    engineering_cost are qualitative labels that help learners make a first-round
+    screening, not multi-GPU benchmark results.
     """
     strategies = [('DDP', 'ddp'), ('ZeRO-1', 1), ('ZeRO-2', 2), ('ZeRO-3', 3)]
     tradeoffs = {
@@ -290,10 +293,10 @@ for row in strategies:
 ```
 
 ---
-## 相关阅读
-本节可以继续接到 ZeRO/FSDP 的运行时管理与 Part 02 的状态分片机制。
-- [DeepSpeed ZeRO](https://www.deepspeed.ai/tutorials/zero/)：查看 ZeRO 不同阶段如何分片 optimizer state、梯度和参数。
-- [PyTorch Fully Sharded Data Parallel](https://pytorch.org/docs/stable/fsdp.html)：了解 FSDP 的参数分片、通信和运行时管理。
-- [27. ZeRO Optimizer Sim | ZeRO 优化器模拟](../02_PyTorch_Algorithms/27_ZeRO_Optimizer_Sim.md)
+## Related Reading
+This section connects on to the runtime management of ZeRO/FSDP and the state sharding mechanisms of Part 02.
+- [DeepSpeed ZeRO](https://www.deepspeed.ai/tutorials/zero/): see how the different ZeRO stages shard optimizer state, gradients, and parameters.
+- [PyTorch Fully Sharded Data Parallel](https://pytorch.org/docs/stable/fsdp.html): learn about FSDP's parameter sharding, communication, and runtime management.
+- [27. ZeRO Optimizer Sim](../02_PyTorch_Algorithms/27_ZeRO_Optimizer_Sim.md)
 
 ---

@@ -1,6 +1,6 @@
 # 08. Programming Models CUDA Triton | 编程模型演进
 
-**难度：** Medium | **环境：** GPU optional
+**Difficulty:** Medium | **Environment:** GPU optional
 
 > 🚀 **云端运行环境**
 >
@@ -9,41 +9,42 @@
 > [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/datawhalechina/llm-algo-leetcode/blob/main/01_Hardware_Math_and_Systems/08_Programming_Models_CUDA_Triton.ipynb)
 > [![Open In Studio](https://img.shields.io/badge/Open%20In-ModelScope-blueviolet?logo=alibabacloud)](https://modelscope.cn/my/mynotebook) *(国内推荐：魔搭社区免费实例)*
 
-**标签：** `算子编程`, `CUDA`, `Triton` | **目标人群：** 编译与系统入门者
+**Tags:** `operator programming`, `CUDA`, `Triton` | **Audience:** learners starting with compilers and systems
 
 ---
 
-## 本节导读
+## Section Guide
 
-从 PyTorch 写法走到 CUDA / Triton，并不是为了“更底层”本身，而是因为框架级算子组合并不总能贴住硬件执行粒度。只要中间张量太多、launch 太碎，或者数据布局和 tile 组织没法显式控制，性能上限就会很快被访存和调度开销卡住。
+Moving from PyTorch expression to CUDA / Triton is not for the sake of being "lower level" itself, but because framework-level operator composition cannot always cling to the hardware execution granularity. As long as there are too many intermediate tensors, launches are too fragmented, or the data layout and tile organization cannot be controlled explicitly, the performance ceiling is quickly capped by memory access and scheduling overhead.
 
-本节比较框架、CUDA 与 Triton 对执行粒度、数据搬运和并行组织的控制范围，为后续算子优化与内核实现建立编程模型入口。学习重点是判断现有抽象缺少哪一层控制权，而不是默认下沉到自定义内核；CUDA 执行层级在第 15–16 节展开，Triton Program 映射在第 18 节展开。
+This section compares the control that the framework, CUDA, and Triton each have over execution granularity, data movement, and parallel organization, establishing a programming-model entry point for later operator optimization and kernel implementation. The learning focus is to judge which layer of control the existing abstraction lacks, rather than defaulting to descending into a custom kernel; the CUDA execution hierarchy is expanded in sections 15–16, and the Triton Program mapping is expanded in section 18.
 
-**关键词：** `grid`, `block`, `kernel`
+**Keywords:** `grid`, `block`, `kernel`
 
-![从张量表达式到 CUDA 与 Triton 映射](../public/01_Hardware_Math_and_Systems/08_programming_model_mapping.svg)
+![From tensor expressions to CUDA and Triton mappings](../public/01_Hardware_Math_and_Systems/08_programming_model_mapping.svg)
 
 ---
-## 前置阅读
-**导语：** 先掌握张量表达和 GPU 资源模型，再比较框架、CUDA 与 Triton 分别暴露哪些控制能力。
-- [03. GPU Architecture and Memory | GPU 物理架构与内存层级](./03_GPU_Architecture_and_Memory.md)
-- [Group 1D: Execution Models, Asynchrony and Operator Mapping | 1D: 执行模型、异步调度与算子映射](./1D.md)
-## Q1：为什么我们需要用 CUDA 或 Triton 编写自定义算子？
+## Prerequisite Reading
+**Overview:** First master tensor expression and the GPU resource model, then compare which control capabilities the framework, CUDA, and Triton each expose.
+- [03. GPU Architecture and Memory](./03_GPU_Architecture_and_Memory.md)
+- [Group 1D: Execution Models, Asynchrony and Operator Mapping](./1D.md)
+## Q1: Why do we need to write custom operators in CUDA or Triton?
 
 
-PyTorch 原生操作方便，但它默认把很多执行细节交给框架和后端。
+Native PyTorch operations are convenient, but by default they leave many execution details to the framework and the backend.
 
-当一个计算链里出现大量小算子、重复的 HBM 往返、或者对布局和 tile 有强约束时，原生写法往往会留下更多中间张量和 launch 开销。自定义 CUDA 或 Triton 的价值，不是“更底层”本身，而是把算子组织方式重新对齐到硬件执行粒度。
+When a computation chain contains many small operators, repeated HBM round trips, or strong constraints on layout and tiles, the native approach often leaves more intermediate tensors and launch overhead. The value of custom CUDA or Triton is not "being lower level" itself, but realigning how the operators are organized with the hardware execution granularity.
 
-所以这类问题的关键，不是“要不要手写 kernel”，而是“哪些数据流和执行流必须由我们显式控制”。
+So the key question in this kind of problem is not "should we hand-write a kernel," but "which data flows and execution flows must be controlled explicitly by us."
 
-### Q1小验证：为什么原生操作可能慢
 
-先想是不是中间张量太多。
+### Q1 mini check: Why native operations may be slow
+
+First think about whether there are too many intermediate tensors.
 
 ```python
 def memory_traffic(num_ops, tensor_bytes, fused=False):
-    """估算逐算子链与完全融合链的外部读写字节量。"""
+    """Estimate the external read/write byte volume of a per-operator chain versus a fully fused chain."""
     if num_ops <= 0 or tensor_bytes <= 0:
         raise ValueError('num_ops and tensor_bytes must be positive')
     reads = num_ops if not fused else 1
@@ -59,27 +60,29 @@ for name, traffic in cases:
     print(name, '->', traffic)
 assert cases[1][1]['traffic_bytes'] < cases[0][1]['traffic_bytes']
 
+
 ```
 
-## Q2：CUDA 的线程层级结构与 GPU 硬件执行单元如何对应？
+## Q2: How does the CUDA thread hierarchy correspond to the GPU hardware execution units?
 
 
-CUDA 的层级不是语法装饰，而是把“任务怎么切”映射到“硬件怎么调度”。
+The CUDA hierarchy is not syntactic decoration; it maps "how the task is split" onto "how the hardware is scheduled."
 
-- grid 决定一次 kernel launch 覆盖多少独立工作；
-- block 决定哪一组线程能共享数据和同步；
-- warp 是硬件实际调度的基本单位；
-- thread 是最细的计算粒度。
+- grid determines how much independent work one kernel launch covers;
+- block determines which group of threads can share data and synchronize;
+- warp is the basic unit the hardware actually schedules;
+- thread is the finest computation granularity.
 
-理解这层映射后，就能看出为什么同样的代码，线程数、block 数和 warp 利用率不同，性能会差很多。
+After understanding this mapping, you can see why the same code can perform very differently with different thread counts, block counts, and warp utilization.
 
-### Q2小验证：层级怎么对应
 
-把执行层级记清楚，后面读 kernel 会更顺。
+### Q2 mini check: How the hierarchy corresponds
+
+Remember the execution hierarchy clearly, and reading kernels later will be smoother.
 
 ```python
 def block_launch_stats(num_threads, warp_size=32):
-    """计算 Warp 数、空闲 lane 和线程槽利用率。"""
+    """Compute the warp count, idle lanes, and thread-slot utilization."""
     if num_threads <= 0 or warp_size <= 0:
         raise ValueError('num_threads and warp_size must be positive')
     warps = (num_threads + warp_size - 1) // warp_size
@@ -98,24 +101,26 @@ except ValueError:
 else:
     raise AssertionError('空 Block 必须报错')
 
+
 ```
 
-## Q3：跨线程共享和同步机制如何限制和优化性能？
+## Q3: How do cross-thread sharing and synchronization mechanisms constrain and improve performance?
 
 
-跨线程共享真正解决的是“同一份数据能不能在片上被复用”。
+What cross-thread sharing really solves is "whether the same piece of data can be reused on-chip."
 
-如果数据只被读一次，shared memory 和同步的开销可能不值；如果同一份数据会被 block 内多个线程反复使用，先放到 shared memory 再同步，通常能换回更多 HBM 访问的节省。
+If the data is read only once, the overhead of shared memory and synchronization may not be worth it; if the same piece of data is used repeatedly by multiple threads inside a block, putting it in shared memory first and then synchronizing usually buys back more savings in HBM accesses.
 
-所以这里不是“共享越多越好”，而是“复用收益是否足以覆盖同步代价”。
+So here it is not "the more sharing, the better," but "whether the reuse gain is enough to cover the synchronization cost."
 
-### Q3小验证：共享为什么会和同步绑定
 
-复用越多，协作就越重要。
+### Q3 mini check: Why sharing is bound to synchronization
+
+The more reuse there is, the more important collaboration becomes.
 
 ```python
 def shared_tradeoff(reuse_times, sync_points, tile_bytes, bandwidth_bytes_per_us, sync_cost_us):
-    """把减少的 HBM 字节换算成时间，并与同步时间比较。"""
+    """Convert the reduced HBM bytes into time and compare it with the synchronization time."""
     if reuse_times <= 0 or sync_points < 0 or tile_bytes <= 0 or bandwidth_bytes_per_us <= 0 or sync_cost_us < 0:
         raise ValueError('invalid reuse or timing inputs')
     saved_hbm_bytes = max(reuse_times - 1, 0) * tile_bytes
@@ -128,24 +133,26 @@ for reuse_times, sync_points in [(1, 0), (2, 1), (4, 1), (4, 3)]:
 assert shared_tradeoff(1, 0, 64_000, 16_000, 2.0)['worth_it'] is False
 assert shared_tradeoff(4, 1, 64_000, 16_000, 2.0)['worth_it'] is True
 
+
 ```
 
-## Q4：Triton 为什么能降低算子开发门槛？
+## Q4: Why can Triton lower the barrier to operator development?
 
 
-Triton 的抽象重点，不是“帮你自动变快”，而是把 tile、block 和布局这些样板性细节收起来，让你先把张量切分方式写清楚。
+The focus of Triton's abstraction is not "making things automatically faster for you," but hiding boilerplate details such as tiles, blocks, and layouts so that you can first write the tensor partitioning clearly.
 
-和 CUDA 相比，它并不是取消底层约束，而是把底层约束收束成更少的显式概念：布局、mask、tile 和 program 关系。
+Compared with CUDA, it does not remove the low-level constraints, but condenses them into fewer explicit concepts: layout, mask, tile, and program relationships.
 
-所以 Triton 的门槛更低，是因为它减少了模板代码；但它的性能边界，仍然取决于你对执行粒度和数据布局的理解。
+So Triton's barrier is lower because it reduces boilerplate code; but its performance boundary still depends on your understanding of execution granularity and data layout.
 
-### Q4小验证：Triton 抽象了什么
 
-先看块组织，再看算子细节。
+### Q4 mini check: What Triton abstracts
+
+First look at block organization, then at operator details.
 
 ```python
 def triton_candidate(num_elements, block_size, layout_contiguous, dtype_supported, max_padding_ratio=0.25):
-    """检查布局、dtype 和边界填充是否满足教学候选门槛。"""
+    """Check whether the layout, dtype, and boundary padding meet the teaching candidate threshold."""
     if num_elements <= 0 or block_size <= 0 or not 0 <= max_padding_ratio < 1:
         raise ValueError('invalid shape or padding threshold')
     programs = (num_elements + block_size - 1) // block_size
@@ -166,17 +173,19 @@ assert blocked['reasons'] == ['non_contiguous_layout']
 print(ready)
 print(blocked)
 
+
 ```
 
-## 编程模型与执行路径
+## Programming Models and Execution Paths
 
-- 自定义算子不是为了炫技，而是为了更好地控制执行路径。
-- CUDA 和 Triton 是不同范式，但目标都在靠近硬件。
-- 共享和同步是一起看的，不能只谈一个。
-- 编程模型的核心是映射，不是语法本身。
-## 相关阅读
-**导语：** 如果想继续把编程模型和 kernel 组织方式补完整，可以接着看这些页。
-- [Part 03: Triton Kernel Development | 第三部分：Triton 算子开发](../03_Triton_Kernels/intro.md)
-- [01. Triton 入门与 Hello World：向量加法 (Vector Addition)](../03_Triton_Kernels/01_Triton_Vector_Addition.md)
-- [05. Triton 矩阵乘法 (GEMM) 与自动调优 (Autotune)](../03_Triton_Kernels/05_Triton_GEMM_Tutorial.md)
+- Custom operators are not about showing off, but about controlling the execution path better.
+- CUDA and Triton are different paradigms, but both aim to get closer to the hardware.
+- Sharing and synchronization must be examined together; you cannot discuss only one.
+- The core of a programming model is the mapping, not the syntax itself.
+
+## Related Reading
+**Overview:** If you want to complete the picture of programming models and kernel organization, you can continue with these pages.
+- [Part 03: Triton Kernel Development](../03_Triton_Kernels/intro.md)
+- [01. Triton Hello World: Vector Addition](../03_Triton_Kernels/01_Triton_Vector_Addition.md)
+- [05. Triton GEMM and Autotune](../03_Triton_Kernels/05_Triton_GEMM_Tutorial.md)
 ---

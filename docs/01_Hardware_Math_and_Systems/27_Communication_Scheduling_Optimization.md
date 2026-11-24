@@ -1,6 +1,6 @@
 # 27. Communication Scheduling Optimization | 通信调度优化
 
-**难度：** Hard | **环境：** CPU-first | **标签：** `并行通信`, `通信优化`, `Overlap` | **目标人群：** 通信机制入门者
+**Difficulty:** Hard | **Environment:** CPU-first | **Tags:** `parallel communication`, `communication optimization`, `Overlap` | **Audience:** learners starting with communication mechanisms
 
 > 🚀 **云端运行环境**
 >
@@ -12,43 +12,44 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-通信总时长不一定全部暴露在训练步关键路径上。消息大小、启动次数、依赖关系和可重叠计算共同决定通信是否真正拉长单步时间。
+The total communication time is not necessarily all exposed on the training-step critical path. Message size, launch count, dependencies, and overlappable computation together determine whether communication really lengthens the step time.
 
-本节建立“通信负载 → 启动与带宽成本 → 调度次序 → 暴露时间”的关系。完成后，你应能比较分桶、集合通信选择和计算重叠对关键路径的影响。
+This section establishes the relationship "communication load → launch and bandwidth cost → scheduling order → exposed time." When you finish, you should be able to compare the effect of bucketing, collective communication selection, and computation overlap on the critical path.
 
-**关键词：** 计算—通信重叠、`All-Reduce`、`All-to-All`
+**Keywords:** communication-computation overlap, `All-Reduce`, `All-to-All`
 
-![本节概念关系](../public/01_Hardware_Math_and_Systems/27_communication_schedule_map.svg)
+![Concept relationships in this section](../public/01_Hardware_Math_and_Systems/27_communication_schedule_map.svg)
 
 
-## 前置阅读
+## Prerequisite Reading
 
-**导语：** 先把通信拓扑、并行策略和 NCCL 同步原语对应到一次训练 step，再分析通信放在什么位置、以什么粒度发送，以及哪些计算可以与它重叠。
+**Overview:** First map the communication topology, parallel strategies, and NCCL synchronization primitives onto one training step, then analyze where communication is placed, at what granularity it is sent, and which computation can overlap with it.
 
-- [05. Communication Topologies | 通信拓扑与分布式基石](./05_Communication_Topologies.md)
-- [20. NCCL and AllReduce Basics | NCCL 与 AllReduce 基础](./20_NCCL_and_AllReduce_Basics.md)
-- [26. Parallel Strategy Decision Framework | 并行策略决策框架](./26_Parallel_Strategy_Decision_Framework.md)
+- [05. Communication Topologies](./05_Communication_Topologies.md)
+- [20. NCCL and AllReduce Basics](./20_NCCL_and_AllReduce_Basics.md)
+- [26. Parallel Strategy Decision Framework](./26_Parallel_Strategy_Decision_Framework.md)
 
-## Q1：通信成本如何由数据量、带宽、延迟和同步共同决定？
+## Q1: How is communication cost determined jointly by data volume, bandwidth, latency, and synchronization?
 
-一次通信的理想时间可拆成固定启动成本和载荷传输成本。对同样的总字节数，拆成更多消息不会降低理想传输量，却会重复支付启动延迟。
+The ideal time of one communication can be split into a fixed launch cost and a payload transfer cost. For the same total byte count, splitting into more messages does not lower the ideal transfer volume, but it pays the launch latency repeatedly.
 
-| 数量 | 单位 | 对通信时间的影响 |
+| Quantity | Unit | Effect on communication time |
 | --- | --- | --- |
-| 有效载荷 | MiB | 在带宽固定时线性增长 |
-| 可持续带宽 | GiB/s | 决定载荷传输下限 |
-| 单次启动延迟 | μs | 小消息或高频通信更敏感 |
-| 启动次数 | 次 | 决定固定成本被支付多少次 |
+| Payload | MiB | Grows linearly when bandwidth is fixed |
+| Sustainable bandwidth | GiB/s | Determines the payload transfer lower bound |
+| Single-launch latency | μs | More sensitive for small messages or high-frequency communication |
+| Launch count | count | Determines how many times the fixed cost is paid |
 
-### Q1小验证
 
-拆开数据量、带宽、延迟和同步次数的影响。
+### Q1 mini check
+
+Separate the effects of data volume, bandwidth, latency, and the number of synchronizations.
 
 ```python
 def communication_time_ms(payload_mib, bandwidth_gib_s, latency_us, launches=1):
-    """用 alpha-beta 模型估算一个通信阶段的理想时间。"""
+    """Estimate the ideal time of one communication phase with an alpha-beta model."""
     if payload_mib < 0 or bandwidth_gib_s <= 0 or latency_us < 0 or launches <= 0:
         raise ValueError('有效载荷、带宽、延迟或启动次数非法')
     transfer_ms = payload_mib / 1024 / bandwidth_gib_s * 1000
@@ -67,25 +68,27 @@ for launches in (1, 8, 64):
 assert communication_time_ms(0, 50, 8, 4)['communication_ms'] == 0.032
 assert communication_time_ms(256, 50, 8, 8)['transfer_ms'] == 5.0
 
+
 ```
 
-## Q2：为什么把小通信合并成大通信通常更稳？
+## Q2: Why is merging small communications into large ones usually more stable?
 
-在反向传播中，梯度只有在对应层完成后才能进入通信。较小的分桶能更早启动 All-Reduce，但会增加启动次数；较大的分桶减少启动成本，却可能等待更多梯度就绪。
+In the backward pass, gradients can only enter communication after the corresponding layer is complete. Smaller buckets can start All-Reduce earlier but increase the launch count; larger buckets reduce the launch cost but may wait for more gradients to become ready.
 
-| 分桶变化 | 可能收益 | 可能代价 | 应观察的量 |
+| Bucketing change | Possible gain | Possible cost | Quantity to observe |
 | --- | --- | --- | --- |
-| 减小分桶 | 通信更早开始 | 启动次数增加 | 首个分桶启动时间、启动数 |
-| 增大分桶 | 固定启动成本降低 | 等待就绪的时间增加 | 通信完成时间、暴露通信 |
-| 就绪顺序改变 | 与反向计算形成更长重叠窗口 | 可能破坏原有依赖 | 分桶就绪时间与关键路径 |
+| Smaller buckets | Communication starts earlier | More launches | First bucket start time, launch count |
+| Larger buckets | Lower fixed launch cost | More waiting for readiness | Communication finish time, exposed communication |
+| Changed readiness order | A longer overlap window with backward computation | May break existing dependencies | Bucket readiness time and critical path |
 
-### Q2小验证
 
-比较合并消息后的启动开销与 overlap 空间。
+### Q2 mini check
+
+Compare the launch overhead and the overlap space after merging messages.
 
 ```python
 def schedule_gradient_buckets(layers, bucket_cap_mib, bandwidth_gib_s=50, latency_us=8):
-    """根据梯度就绪时间和分桶容量构建通信时间线。"""
+    """Build a communication timeline from gradient readiness time and bucket capacity."""
     if bucket_cap_mib <= 0 or not layers:
         raise ValueError('分桶容量必须为正，且层列表不能为空')
     buckets, pending, pending_mib = [], [], 0.0
@@ -135,30 +138,32 @@ for bucket_cap_mib in (32, 64, 128):
 assert schedule_gradient_buckets(layers, 32)['bucket_count'] == 4
 assert schedule_gradient_buckets(layers, 128)['bucket_count'] == 1
 
+
 ```
 
-## Q3：为什么 All-Reduce / All-to-All 的优化目标不同？
+## Q3: Why do All-Reduce and All-to-All have different optimization targets?
 
-All-Reduce 对每个 rank 的同尺寸张量做规约并广播，环形实现中每个 rank 的逻辑传输量约为 `2(P-1)/P` 倍载荷。All-to-All 则把不同数量的状态发往不同 rank；总载荷相近时，最忙 rank 的接收量仍可能决定完成时间。
+All-Reduce reduces and broadcasts same-sized tensors on every rank; in the ring implementation, the logical transfer volume per rank is about `2(P-1)/P` times the payload. All-to-All instead sends different amounts of state to different ranks; when the total payload is similar, the receive volume of the busiest rank can still determine the completion time.
 
-| 集合通信 | 主要负载 | 主要不均衡来源 | 调度时优先观察 |
+| Collective communication | Main load | Main source of imbalance | What to observe first when scheduling |
 | --- | --- | --- | --- |
-| All-Reduce | 梯度或分片张量 | rank 变慢、分桶就绪时间不一致 | 分桶就绪、启动次数、暴露通信 |
-| All-to-All | token、专家输入或序列分片 | 路由或序列分布倾斜 | 最大 rank 载荷、长尾与空闲 rank |
+| All-Reduce | Gradients or sharded tensors | A slow rank, inconsistent bucket readiness times | Bucket readiness, launch count, exposed communication |
+| All-to-All | tokens, expert inputs, or sequence shards | Skewed routing or sequence distribution | Maximum per-rank load, long tail, and idle ranks |
 
-### Q3小验证
 
-区分 All-Reduce 的同步压力和 All-to-All 的路由压力。
+### Q3 mini check
+
+Distinguish the synchronization pressure of All-Reduce from the routing pressure of All-to-All.
 
 ```python
 def ring_allreduce_payload_mib(tensor_mib, world_size):
-    """返回环形 All-Reduce 中每个 rank 的逻辑传输量。"""
+    """Return the logical transfer volume of each rank in a ring All-Reduce."""
     if tensor_mib < 0 or world_size < 2:
         raise ValueError('张量容量必须非负，world_size 至少为 2')
     return tensor_mib * 2 * (world_size - 1) / world_size
 
 def alltoall_route_ledger(token_matrix, bytes_per_token):
-    """计算 All-to-All 路由矩阵的跨 rank 载荷和接收不均衡。"""
+    """Compute the cross-rank payload and receive imbalance of an All-to-All routing matrix."""
     world_size = len(token_matrix)
     if world_size < 2 or any(len(row) != world_size for row in token_matrix):
         raise ValueError('token_matrix 必须是至少包含两个 rank 的方阵')
@@ -185,26 +190,28 @@ print('Skewed All-to-All:', alltoall_route_ledger(skewed, bytes_per_token=4096))
 assert ring_allreduce_payload_mib(256, 4) == 384
 assert alltoall_route_ledger(skewed, 4096)['max_to_mean_receive_ratio'] > 3
 
+
 ```
 
-## Q4：怎样把通信排进计算间隙？
+## Q4: How do you fit communication into the gaps in computation?
 
-通信隐藏只能来自与它没有未解决数据依赖的计算区间。多个计算区间可能相互重叠，因此要先求它们在通信区间内的并集，再计算已隐藏和暴露时间，不能直接累加重叠窗口。
+Communication hiding can only come from compute intervals that have no unresolved data dependency on it. Multiple compute intervals may overlap each other, so you must first take their union within the communication interval and then compute the hidden and exposed time; overlapping windows cannot simply be summed.
 
-| 时间量 | 含义 | 与关键路径的关系 |
+| Time quantity | Meaning | Relationship to the critical path |
 | --- | --- | --- |
-| 通信总时间 | 集合通信在设备上的活动区间 | 不一定全部延长 step |
-| 已隐藏通信 | 被独立计算区间覆盖的通信 | 不再单独增加关键路径 |
-| 暴露通信 | 通信区间中未被覆盖的部分 | 是调度优化要减少的直接对象 |
-| 重叠比例 | 已隐藏时间 / 通信总时间 | 要与 step 时间一起解读 |
+| Total communication time | The active interval of the collective communication on the device | Does not necessarily lengthen the step in full |
+| Hidden communication | Communication covered by independent compute intervals | No longer adds to the critical path separately |
+| Exposed communication | The part of the communication interval that is not covered | The direct target that scheduling optimization should reduce |
+| Overlap ratio | Hidden time / total communication time | Must be read together with step time |
 
-### Q4小验证
 
-观察通信进入计算间隙后，关键路径成本如何变化。
+### Q4 mini check
+
+Observe how the critical-path cost changes once communication enters the gaps in computation.
 
 ```python
 def communication_exposure(comm_interval, independent_compute_intervals):
-    """裁剪并合并计算区间，返回已隐藏与暴露通信时间。"""
+    """Clip and merge compute intervals, and return the hidden and exposed communication time."""
     comm_start, comm_end = comm_interval
     if comm_end < comm_start:
         raise ValueError('通信区间非法')
@@ -245,13 +252,14 @@ for case in cases:
 assert communication_exposure((0, 12), [(1, 4), (3, 8)])['hidden_ms'] == 7
 assert communication_exposure((0, 12), [(-2, 20)])['exposed_ms'] == 0
 
+
 ```
 
-## 相关阅读
+## Related Reading
 
-**导语：** 把理论调度继续接到 CUDA 依赖和 Part 02 的真实通信时间线。
+**Overview:** Continue from theoretical scheduling to CUDA dependencies and the real communication timeline in Part 02.
 
-- [17. CUDA Stream and Asynchrony | CUDA Stream 与异步执行](./17_CUDA_Stream_and_Asynchrony.md)
-- [29. CUDA Stream Advanced Scheduling | CUDA Stream 高级调度](./29_CUDA_Stream_Advanced_Scheduling.md)
-- [Part 02 · 48 通信热点与缓解](../02_PyTorch_Algorithms/48_Communication_Hotspots_and_Mitigation.md)
+- [17. CUDA Stream and Asynchrony](./17_CUDA_Stream_and_Asynchrony.md)
+- [29. CUDA Stream Advanced Scheduling](./29_CUDA_Stream_Advanced_Scheduling.md)
+- [Part 02 · 48 Communication Hotspots and Mitigation](../02_PyTorch_Algorithms/48_Communication_Hotspots_and_Mitigation.md)
 ---

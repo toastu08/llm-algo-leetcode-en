@@ -1,6 +1,6 @@
 # 26. Parallel Strategy Decision Framework | 并行策略决策框架
 
-**难度：** Hard | **环境：** CPU-first | **标签：** `并行通信`, `并行策略`, `策略决策` | **目标人群：** 通信机制入门者
+**Difficulty:** Hard | **Environment:** CPU-first | **Tags:** `parallel communication`, `parallel strategy`, `strategy decision` | **Audience:** learners starting with communication mechanisms
 
 > 🚀 **云端运行环境**
 >
@@ -12,56 +12,57 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-当单设备无法满足容量或吞吐目标时，可以切分训练状态、网络层、张量、序列、专家或服务请求。不同切分对象解决的问题不同，也会引入不同通信与负载风险。
+When a single device cannot meet the capacity or throughput target, you can split the training state, network layers, tensors, sequences, experts, or serving requests. Different partitioned objects solve different problems, and each also introduces different communication and load risks.
 
-本节建立“容量约束 → 切分对象 → 互连条件 → 风险门槛”的筛选顺序。完成后，你应能先排除不满足硬约束的候选，再为保留策略确定需要验证的通信和扩展证据。
+This section establishes the screening order "capacity constraint → partitioned object → interconnect condition → risk threshold." When you finish, you should be able to first exclude candidates that do not satisfy the hard constraints, then determine for the retained strategies which communication and scaling evidence needs to be verified.
 
-**关键词：** `DP`, `TP`, `PP`, `CP`, `EP`, `Replica`
+**Keywords:** `DP`, `TP`, `PP`, `CP`, `EP`, `Replica`
 
-![本节概念关系](../public/01_Hardware_Math_and_Systems/26_parallel_strategy_decision_map.svg)
-## 前置阅读
+![Concept relationships in this section](../public/01_Hardware_Math_and_Systems/26_parallel_strategy_decision_map.svg)
+## Prerequisite Reading
 
-**导语：** 先把通信拓扑和显存切分的基础直觉接上，再看这页的并行策略选择，会更容易把“能不能放下”和“怎么切”连起来。
+**Overview:** First connect the basic intuitions of communication topology and memory partitioning, then look at the parallel strategy selection on this page; it will be easier to link "whether it fits" with "how to split."
 
-- [05. Communication Topologies | 通信拓扑与分布式基石](./05_Communication_Topologies.md)
-- [06. VRAM Calculation and ZeRO | 显存计算与 ZeRO 优化](./06_VRAM_Calculation_and_ZeRO.md)
-## Q1：当前首先受显存、通信还是模型结构约束？
+- [05. Communication Topologies](./05_Communication_Topologies.md)
+- [06. VRAM Calculation and ZeRO](./06_VRAM_Calculation_and_ZeRO.md)
+## Q1: Is the current bottleneck first memory, communication, or model structure?
 
 
-并行策略不要先背名字，先登记约束：
+Do not memorize the names of parallel strategies first; register the constraints first:
 
-1. **容量约束**：每个设备需要保留多少模型状态、激活和运行余量
-2. **互连约束**：并行组位于机内还是跨机，链路带宽和时延是多少
-3. **工作负载约束**：当前是训练还是服务，模型是稠密还是 MoE，上下文是否需要切分
+1. **Capacity constraint**: how much model state, activation, and runtime headroom each device must keep
+2. **Interconnect constraint**: whether parallel groups are inside a node or across nodes, and what the link bandwidth and latency are
+3. **Workload constraint**: whether the current task is training or serving, whether the model is dense or MoE, and whether the context needs to be split
 
-从这个角度看，不同策略处理的对象并不一样：
-- **DP** 解决“数据怎么铺开”，前提是模型至少接近能放下
-- **TP** 解决“单层怎么拆算”，前提是机内互连足够强
-- **PP** 解决“层怎么分段”，前提是模型足够深或单卡显存偏紧
-- **EP** 解决“专家怎么分发”，前提是路由和 token 交换能承受
-- **CP** 解决“长序列怎么切分”，前提是 Attention 状态交换可承受
-- **Replica** 解决“请求怎么分发”，前提是多副本容量、队列和缓存局部性可观测
+From this angle, different strategies handle different objects:
+- **DP** solves "how to spread out the data," provided the model at least nearly fits
+- **TP** solves "how to split the computation of a single layer," provided the intra-node interconnect is strong enough
+- **PP** solves "how to segment the layers," provided the model is deep enough or the per-GPU memory is rather tight
+- **EP** solves "how to dispatch the experts," provided routing and token exchange can bear it
+- **CP** solves "how to split a long sequence," provided Attention state exchange can bear it
+- **Replica** solves "how to distribute the requests," provided multi-replica capacity, queues, and cache locality are observable
 
-策略选择不是给候选打一个综合分，而是先记录可测量的约束，再排除不满足硬条件的候选。
+Strategy selection is not about giving a candidate a composite score, but about recording measurable constraints first and then excluding candidates that do not satisfy the hard conditions.
 
-| 策略 | 主要切分对象 | 主要压力 | 最关键前提 |
+| Strategy | Main partitioned object | Main pressure | Most critical precondition |
 | --- | --- | --- | --- |
-| DP / ZeRO | batch、参数、梯度或优化器状态 | 梯度同步与状态聚合 | 模型与训练状态有明确分片方案 |
-| TP | 层内张量与激活 | 高频 collective | 机内互连强 |
-| PP | layers / stages | pipeline bubble 与 stage 传输 | 模型足够深且 stage 可平衡 |
-| CP | sequence / context | Attention 状态交换 | 长上下文收益覆盖通信代价 |
-| EP | experts / tokens | dispatch、combine 与负载不均 | MoE 路由与容量可控 |
-| Replica | serving requests | 队列、缓存局部性与尾延迟 | 多副本状态可观测 |
+| DP / ZeRO | batch, parameters, gradients, or optimizer state | Gradient synchronization and state aggregation | There is a clear sharding plan for the model and training state |
+| TP | Tensors and activations within a layer | High-frequency collective | Strong intra-node interconnect |
+| PP | layers / stages | pipeline bubble and stage transfer | The model is deep enough and stages can be balanced |
+| CP | sequence / context | Attention state exchange | The long-context gain covers the communication cost |
+| EP | experts / tokens | dispatch, combine, and uneven load | MoE routing and capacity are controllable |
+| Replica | serving requests | Queues, cache locality, and tail latency | Multi-replica state is observable |
 
-### Q1小验证
 
-建立带单位的资源账本，检查单设备容量缺口。
+### Q1 mini check
+
+Build a resource ledger with units and check the single-device capacity gap.
 
 ```python
 def build_resource_ledger(state_gib, activation_gib, runtime_reserve_gib, device_memory_gib):
-    """汇总单设备容量需求；所有输入均以 GiB 为单位。"""
+    """Aggregate the single-device capacity requirement; all inputs are in GiB."""
     values = (state_gib, activation_gib, runtime_reserve_gib, device_memory_gib)
     if any(value < 0 for value in values) or device_memory_gib == 0:
         raise ValueError('容量必须为非负数，且设备显存必须大于 0 GiB')
@@ -81,41 +82,43 @@ assert not does_not_fit['fits_one_device']
 print('可单卡容纳：', fits)
 print('存在容量缺口：', does_not_fit)
 
+
 ```
 
-## Q2：不同并行策略会引入什么通信成本？
+## Q2: What communication cost does each parallel strategy introduce?
 
 
-通信成本不要只看“总量”，要同时看两个维度：
+Do not look only at the "total volume" of communication cost; look at two dimensions at the same time:
 
-- **带宽项**：单次搬运的数据有多大
-- **频率项**：这个搬运动作在整个训练路径里重复多少次
+- **Bandwidth term**: how much data a single transfer carries
+- **Frequency term**: how many times this transfer action repeats along the whole training path
 
-可以把它粗略写成：
-$$\text{cost} \approx \text{latency} \times \text{次数} + \frac{\text{data volume}}{\text{bandwidth}}$$
+It can be roughly written as:
+$$\text{cost} \approx \text{latency} \times \text{count} + \frac{\text{data volume}}{\text{bandwidth}}$$
 
-这也是为什么同样叫“通信”，不同策略的脆弱点完全不同：
-- **DP** 的梯度同步偏全局，频率低，但每次同步面更完整
-- **TP** 的层内通信频率高，单次量通常不大，但每层都要碰一次
-- **PP** 的通信发生在 stage 边界，频率低一些，但切不好就会放大气泡和等待
-- **EP** 不只看 volume，还要看 token 路由和负载均衡是否稳定
-- **CP** 随上下文长度交换 Attention 状态，需要同时记录序列长度和通信轮数
-- **Replica** 不交换模型内部张量，但路由失衡会放大排队和尾延迟
+This is also why, although both are called "communication," different strategies have completely different weak points:
+- **DP** gradient synchronization is more global and low-frequency, but each synchronization covers a fuller extent
+- **TP** intra-layer communication is high-frequency and usually small per call, but every layer hits it once
+- **PP** communication happens at stage boundaries and is somewhat lower-frequency, but poor partitioning amplifies bubbles and waiting
+- **EP** depends not only on volume but also on whether token routing and load balance are stable
+- **CP** exchanges Attention state with context length, so the sequence length and the number of communication rounds must be recorded together
+- **Replica** does not exchange tensors inside the model, but routing imbalance amplifies queueing and tail latency
 
-所以，判断并行策略时，真正要问的是：
-- 这个通信是不是高频出现
-- 它能不能被机内互连吃掉
-- 它是不是会卡在同步点上，压掉计算重叠
+So when judging a parallel strategy, what really needs to be asked is:
+- Does this communication occur at high frequency
+- Can it be absorbed by the intra-node interconnect
+- Will it stall at a synchronization point and squeeze out compute overlap
 
-如果频率高、带宽弱，策略再“高级”，最后也会被通信拖回去。
+If the frequency is high and the bandwidth is weak, no matter how "advanced" the strategy is, it will end up being dragged back by communication.
 
-### Q2小验证
 
-用同一单位记录单次载荷、调用次数、链路带宽和固定时延。
+### Q2 mini check
+
+Record the single-call payload, the number of calls, the link bandwidth, and the fixed latency in the same units.
 
 ```python
 def communication_ledger(payload_mib, calls_per_step, bandwidth_gib_s, latency_us):
-    """估算未计拥塞与重叠时，一个训练步内的通信下界。"""
+    """Estimate the communication lower bound within one training step, excluding congestion and overlap."""
     if payload_mib < 0 or calls_per_step < 0 or bandwidth_gib_s <= 0 or latency_us < 0:
         raise ValueError('载荷、次数和时延不得为负，带宽必须大于 0 GiB/s')
     transfer_ms_per_call = payload_mib / 1024 / bandwidth_gib_s * 1000
@@ -136,35 +139,37 @@ assert high_frequency['calls_per_step'] > low_frequency['calls_per_step']
 print('低频大载荷：', low_frequency)
 print('高频小载荷：', high_frequency)
 
+
 ```
 
-## Q3：如何按约束筛选并行策略？
+## Q3: How do you screen parallel strategies by constraint?
 
 
-更实用的决策框架不是“选一个单点策略”，而是按硬约束依次排除：
+A more practical decision framework is not "pick a single-point strategy," but to exclude in order by hard constraint:
 
-1. **Fit gate**：先看单卡能不能把模型主体放下
-   - 放得下，DP 才有基础；放不下，PP / ZeRO 先进入候选
-2. **Interconnect gate**：再看机内互连能不能支撑高频通信
-   - 强互连更支持 TP / EP；弱互连更偏向降低同步频率
-3. **Structure gate**：最后看模型是不是 dense 还是 MoE
-   - dense 常见组合是 DP / TP / PP
-   - MoE 需要把 EP 纳入主决策
-4. **Context gate**：上下文是否长到需要跨卡切分 Attention 状态
-   - 单卡 Attention 状态放不下时，CP 才进入候选
-5. **Serving gate**：目标是同步训练状态，还是分发独立请求
-   - 多副本 Serving 优先评估 Replica 路由，不把它误写成训练 DP
+1. **Fit gate**: first see whether a single GPU can hold the model body
+   - If it fits, DP has a basis; if it does not, PP / ZeRO enter the candidate set first
+2. **Interconnect gate**: next see whether the intra-node interconnect can support high-frequency communication
+   - A strong interconnect favors TP / EP; a weak interconnect favors reducing the synchronization frequency
+3. **Structure gate**: finally see whether the model is dense or MoE
+   - For dense models the common combination is DP / TP / PP
+   - For MoE, EP must be brought into the main decision
+4. **Context gate**: whether the context is long enough that Attention state must be split across GPUs
+   - Only when the Attention state of a single GPU does not fit does CP enter the candidate set
+5. **Serving gate**: whether the goal is to synchronize training state or to distribute independent requests
+   - Multi-replica Serving evaluates Replica routing first, and does not mistakenly write it as training DP
 
-候选页需要公开写出自己的设备显存需求、允许的工作负载、模型结构和链路域。只有这些要求都被当前环境满足，候选才进入后续实测。
-### Q3小验证
+A candidate page must openly state its device memory requirement, allowed workloads, model structures, and link domain. Only when these requirements are all satisfied by the current environment does the candidate enter the subsequent measurement.
 
-让每个候选返回通过状态和拒绝原因，不生成含义不明的综合分数。
+### Q3 mini check
+
+Have each candidate return a pass status and rejection reasons, and do not generate a composite score of unclear meaning.
 
 ```python
 LINK_SCOPE_ORDER = {'none': 0, 'cross_node': 1, 'intra_node': 2}
 
 def evaluate_candidate(candidate, environment):
-    """逐项核对候选声明的硬约束，并返回明确拒绝原因。"""
+    """Check the hard constraints declared by a candidate item by item, and return explicit rejection reasons."""
     reasons = []
     if candidate['memory_per_rank_gib'] > environment['memory_per_device_gib']:
         reasons.append('per-rank memory exceeds device memory')
@@ -194,21 +199,23 @@ assert next(report for report in reports if report['name'] == 'TP')['accepted']
 for report in reports:
     print(report)
 
+
 ```
 
-## Q4：选择并行策略后，如何检查方案风险？
+## Q4: After choosing parallel strategies, how do you check the plan's risks?
 
 
-单个候选通过硬门槛，不代表组合后仍然可行。组合检查至少包括设备数、每个维度的度数、模型结构和部署域；性能风险则继续交给真实通信与负载证据验证。
+A single candidate passing the hard gates does not mean the combination is still feasible. The combination check includes at least the device count, the degree of each dimension, the model structure, and the deployment domain; performance risk is still left to real communication and load evidence.
 
-例如，`TP=4, PP=2, DP=2` 至少需要 16 个 rank；EP 只能用于 MoE；服务副本与训练 DP 都复制模型，但二者的同步语义不同，不能用同一个名称代替。
-### Q4小验证
+For example, `TP=4, PP=2, DP=2` requires at least 16 ranks; EP can only be used for MoE; serving replicas and training DP both replicate the model, but their synchronization semantics differ and cannot be substituted for each other by the same name.
 
-检查组合所需 rank 数与结构条件，输出可定位的问题。
+### Q4 mini check
+
+Check the number of ranks and the structural conditions required by the combination, and output problems that can be located.
 
 ```python
 def validate_parallel_composition(degrees, available_ranks, model_kind):
-    """检查并行度乘积、可用 rank 数和模型结构。"""
+    """Check the parallelism product, the available rank count, and the model structure."""
     supported = {'DP', 'TP', 'PP', 'CP', 'EP', 'Replica'}
     unknown = set(degrees) - supported
     if unknown:
@@ -234,13 +241,14 @@ assert not invalid_plan['valid']
 print('可行组合：', valid_plan)
 print('不可行组合：', invalid_plan)
 
+
 ```
 
-## 相关阅读
+## Related Reading
 
-**导语：** 继续进入策略选择页、上下文切分页和 PyTorch 分布式文档，核对候选所需的真实证据。
+**Overview:** Continue to the strategy selection page, the context partitioning page, and the PyTorch distributed documentation to check the real evidence each candidate requires.
 
-- [Part 02 · 49 并行策略选择](../02_PyTorch_Algorithms/49_Parallelism_Strategy_Selection.md)
-- [Part 02 · PAR-CONTEXT 上下文与序列并行](../02_PyTorch_Algorithms/PAR-CONTEXT_Context_and_Sequence_Parallelism.md)
-- [PyTorch Distributed | PyTorch 分布式训练文档](https://pytorch.org/docs/stable/distributed.html)
+- [Part 02 · 49 Parallelism Strategy Selection](../02_PyTorch_Algorithms/49_Parallelism_Strategy_Selection.md)
+- [Part 02 · PAR-CONTEXT Context and Sequence Parallelism](../02_PyTorch_Algorithms/PAR-CONTEXT_Context_and_Sequence_Parallelism.md)
+- [PyTorch Distributed](https://pytorch.org/docs/stable/distributed.html)
 ---

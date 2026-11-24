@@ -1,6 +1,6 @@
 # 29. CUDA Stream Advanced Scheduling | CUDA Stream 高级调度
 
-**难度：** Hard | **环境：** CPU-first | **标签：** `算子编程`, `CUDA Stream`, `异步调度` | **目标人群：** 编译与系统入门者
+**Difficulty:** Hard | **Environment:** CPU-first | **Tags:** `operator programming`, `CUDA Stream`, `asynchronous scheduling` | **Audience:** learners starting with compilers and systems
 
 > 🚀 **云端运行环境**
 >
@@ -12,33 +12,36 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-数据搬入后才能计算，计算结束后才能回传；不同批次之间又可能存在独立工作。把这些依赖与同一队列中的提交顺序放到一起，才能判断多队列调度留下了多少重叠空间。
+Computation can only start after data is transferred in, and data can only be copied back after computation finishes; yet different batches may also contain independent work. Only by putting these dependencies together with the submission order within the same queue can you judge how much overlap space multi-queue scheduling leaves.
 
-本节先计算依赖约束下的起止时间，再比较单批次依赖链与多批次流水线，区分队列优先级和 Graph 回放各自改变的对象。计算器在 CPU 上运行，结果依赖于阶段耗时和资源可并行的假设；真实执行可继续进入性能分析专题核对时间线。
+This section first computes start and end times under dependency constraints, then compares the single-batch dependency chain with a multi-batch pipeline, distinguishing what queue priority and Graph replay each change. The calculator runs on the CPU, and its results depend on the stage durations and the assumption that resources can run in parallel; real execution can continue into the performance analysis topic to check the timeline.
 
-**关键词：** `stream`, `event`, `graph`
+**Keywords:** `stream`, `event`, `graph`
 
-![Stream、Event 与 CUDA Graph 的调度关系](../public/01_Hardware_Math_and_Systems/29_stream_event_graph_pipeline.svg)
+![Scheduling relationship among Stream, Event, and CUDA Graph](../public/01_Hardware_Math_and_Systems/29_stream_event_graph_pipeline.svg)
 
 ---
-## 前置阅读
+## Prerequisite Reading
 
-**导语：** 先掌握阶段放置和 Stream 基础，再用 Event、优先级与 Graph 组织更复杂的依赖。
+**Overview:** First master stage placement and the Stream basics, then use Events, priorities, and Graphs to organize more complex dependencies.
 
-- [07. CPU and GPU Heterogeneous Scheduling | CPU 与 GPU 异构调度](./07_CPU_GPU_Heterogeneous_Scheduling.md)
-- [17. CUDA Stream and Asynchrony | CUDA Stream 与异步执行](./17_CUDA_Stream_and_Asynchrony.md)
+- [07. CPU and GPU Heterogeneous Scheduling](./07_CPU_GPU_Heterogeneous_Scheduling.md)
+- [17. CUDA Stream and Asynchrony](./17_CUDA_Stream_and_Asynchrony.md)
 
-## Q1：怎样把任务依赖转换成可调度的 Stream 时间线？
 
-同一 Stream 中的任务按给定列表顺序执行；跨 Stream 的任务还必须等待显式前驱。对每个任务，取所有前驱的最晚结束时间作为最早开始时间，再加自身耗时得到结束时间。反复推进已满足前驱的任务，就能得到一条满足依赖的时间线。
+## Q1: How do you convert task dependencies into a schedulable Stream timeline?
 
-下面假设不同 Stream 有独立执行资源、任务耗时固定、没有提交开销或资源争用。因而结果是理想调度估算，而非实测 CUDA 时间。若忽略跨队列依赖，只取各队列累计耗时的最大值，会把仍需等待的工作误算成可重叠工作。
+Tasks in the same Stream execute in the order of the given list; tasks across Streams must also wait for explicit predecessors. For each task, take the latest end time among all predecessors as the earliest start time, then add its own duration to get the end time. Advancing repeatedly over the tasks whose predecessors are already satisfied yields a timeline that satisfies the dependencies.
 
-### Q1小验证：计算带依赖的起止时间
+The following assumes that different Streams have independent execution resources, that task durations are fixed, and that there is no submission overhead or resource contention. The result is therefore an ideal scheduling estimate, not a measured CUDA time. If cross-queue dependencies are ignored and only the maximum cumulative duration of each queue is taken, work that still has to wait will be miscounted as overlappable work.
 
-保持任务耗时不变，比较不同 Stream 中独立任务与串行依赖链的完成时间。
+
+### Q1 mini check: Compute start and end times with dependencies
+
+Keep the task durations unchanged and compare the completion time of independent tasks in different Streams against a serial dependency chain.
+
 
 
 ```python
@@ -56,7 +59,7 @@ class TaskStage:
 
 
 def schedule_stages(stages: List[TaskStage]) -> Dict[str, dict]:
-    """计算理想时间线；同队列顺序与跨队列前驱必须同时满足。"""
+    """Compute the ideal timeline; same-queue order and cross-queue predecessors must both hold."""
     by_name = {}
     predecessors = {}
     previous_on_stream = {}
@@ -103,39 +106,42 @@ def schedule_stages(stages: List[TaskStage]) -> Dict[str, dict]:
 
 
 def sequential_time_us(stages: List[TaskStage]) -> float:
-    """计算合法任务集合全部串行执行时的总耗时。"""
+    """Compute the total time when all tasks of a valid task set execute serially."""
     schedule_stages(stages)
     return sum(stage.duration_us for stage in stages)
 
 
 def pipelined_time_us(stages: List[TaskStage]) -> float:
-    """取满足全部依赖的最晚完成时间，不忽略跨队列等待。"""
+    """Take the latest completion time that satisfies all dependencies, without ignoring cross-queue waiting."""
     timeline = schedule_stages(stages)
     return max((event['end_us'] for event in timeline.values()), default=0.0)
 
 
 def overlap_ratio(sequential_us: float, pipelined_us: float) -> float:
-    """理想隐藏时间占串行总时间的比例，不表示设备利用率。"""
+    """The share of the serial total time that is ideally hidden; does not represent device utilization."""
     if not all(math.isfinite(value) for value in (sequential_us, pipelined_us)):
         raise ValueError('时间必须为有限数')
     if not 0 <= pipelined_us <= sequential_us:
         raise ValueError('理想流水线时间必须位于零与串行时间之间')
     return 1 - pipelined_us / sequential_us if sequential_us else 0.0
 
+
 ```
 
-## Q2：跨 Stream 的等待怎样进入完成时间？
+## Q2: How does cross-Stream waiting enter the completion time?
 
-生产者完成工作后记录 Event，消费者等待该事件，再使用结果。依赖边只约束真正相关的任务；同一队列内的顺序则隐含存在。单批次的搬入、计算、回传如果首尾相依，拆成多个 Stream 后仍然需要串行完成。
+After the producer finishes its work it records an Event, the consumer waits for that event, and then uses the result. Dependency edges constrain only the tasks that are genuinely related; order within the same queue exists implicitly. If the transfer-in, computation, and transfer-back of a single batch are chained head to tail, they still have to complete serially after being split into multiple Streams.
 
-下面保留四个阶段的依赖链。最后的主机后处理也作为独立逻辑队列建模；它不是 CUDA Stream 上的设备操作。对比各阶段起止时间，检查是否出现“生产者尚未结束，消费者已开始”的错误。
+The dependency chain of four stages is kept below. The final host post-processing is also modeled as an independent logical queue; it is not a device operation on a CUDA Stream. Compare the start and end times of the stages and check whether the error "the consumer has started before the producer has finished" appears.
 
-### Q2小验证：依赖链不能被队列拆分缩短
+
+### Q2 mini check: A dependency chain cannot be shortened by splitting it across queues
+
 
 
 ```python
 def build_dependency_edges(stages: List[TaskStage]) -> List[Tuple[str, str]]:
-    """返回显式依赖边；同队列顺序由时间线计算器另行加入。"""
+    """Return the explicit dependency edges; same-queue order is added separately by the timeline calculator."""
     schedule_stages(stages)
     return [(dep, stage.name) for stage in stages for dep in stage.depends_on]
 
@@ -147,6 +153,7 @@ def has_cross_stream_dependency(stages: List[TaskStage]) -> bool:
         name_to_stage[dep].stream != stage.stream
         for stage in stages for dep in stage.depends_on
     )
+
 
 ```
 
@@ -175,18 +182,20 @@ test_event_dependencies()
 
 ```
 
-## Q3：Graph 回放改变了依赖，还是提交成本？
+## Q3: Does Graph replay change the dependencies or the submission cost?
 
-CUDA Graph 复用一段已捕获的执行结构，主要针对重复提交开销；原有数据依赖仍然成立。上一问的依赖链即使被捕获，也不能让消费者在生产者完成前执行。
+CUDA Graph reuses an already captured execution structure and mainly targets the repeated submission overhead; the original data dependencies still hold. Even if the dependency chain from the previous question is captured, it cannot let the consumer execute before the producer finishes.
 
-先选择形状和执行路径稳定、重复运行的子图，再检查捕获支持、内存地址与资源生命周期等条件。下面只筛选最简单的固定子图候选；返回真还不代表捕获成功，也不表示已有加速。变长服务可以按形状分桶或只捕获稳定子图，不能仅凭“变长”就判定整个服务无法使用 Graph。
+First choose subgraphs with a stable shape and execution path that run repeatedly, then check the conditions such as capture support, memory addresses, and resource lifetimes. Below only the simplest fixed-subgraph candidates are screened; a return of true does not yet mean the capture succeeds, nor that a speedup has been obtained. A variable-length service can bucket by shape or capture only the stable subgraph; you cannot conclude that the whole service cannot use Graph just because it is "variable length."
 
-### Q3小验证：筛选固定子图回放候选
+
+### Q3 mini check: Screen fixed-subgraph replay candidates
+
 
 
 ```python
 def graph_suitability(is_fixed_shape: bool, is_repeated_path: bool, has_many_branches: bool) -> bool:
-    """筛选简单固定子图候选，不验证实际捕获支持或性能。"""
+    """Screen simple fixed-subgraph candidates; does not verify actual capture support or performance."""
     return is_fixed_shape and is_repeated_path and not has_many_branches
 
 assert graph_suitability(True, True, False) is True
@@ -194,6 +203,7 @@ assert graph_suitability(True, False, False) is False
 assert graph_suitability(False, True, False) is False
 assert graph_suitability(True, True, True) is False
 print('✅ Graph 适用性测试通过')
+
 
 ```
 
@@ -210,18 +220,20 @@ for name, fixed_shape, repeated_path, many_branches in cases:
 
 ```
 
-## Q4：多批次流水线怎样产生重叠空间？
+## Q4: How does a multi-batch pipeline create overlap space?
 
-单批次存在搬入、计算和回传的依赖，但下一批输入搬运可能与当前批计算独立。下面固定两批相同任务，假设输入搬运、计算、输出回传各有独立资源，检查批次之间的重叠窗口。实际设备若共享拷贝资源，或这些阶段争用带宽，完成时间会比这个模型更长。
+A single batch has a dependency among transfer-in, computation, and transfer-back, but the input transfer of the next batch may be independent of the computation of the current batch. Below, two identical batches are fixed, assuming the input transfer, computation, and output transfer-back each have independent resources, to check the overlap window between batches. If the actual device shares copy resources, or these stages contend for bandwidth, the completion time will be longer than this model.
 
-Stream 优先级影响就绪工作的调度偏好，不取消依赖，也不是对已运行工作立即抢占的保证。因此，计算器不按优先级生成固定收益；先从依赖时间线得到理想节省，再单独加入假设的暴露调度开销。
+Stream priority affects the scheduling preference of ready work; it does not remove dependencies, nor is it a guarantee of immediate preemption of already-running work. Therefore, the calculator does not generate a fixed gain from priority; it first obtains the ideal saving from the dependency timeline, then adds the assumed exposed scheduling overhead separately.
 
-### Q4小验证：比较单批依赖链与两批流水线
+
+### Q4 mini check: Compare the single-batch dependency chain with a two-batch pipeline
+
 
 
 ```python
 def pipeline_comparison(stages: List[TaskStage], exposed_overhead_us=0.0) -> dict:
-    """分别记录理想重叠与给定暴露开销，不按阶段比例推荐拆队列。"""
+    """Record the ideal overlap and the given exposed overhead separately; does not recommend splitting queues by stage ratio."""
     if not math.isfinite(exposed_overhead_us) or exposed_overhead_us < 0:
         raise ValueError('暴露开销必须是有限非负数')
     serial = sequential_time_us(stages)
@@ -251,25 +263,27 @@ assert pipeline_comparison(stages, exposed_overhead_us=25)['net_saved_us'] == -3
 print('两批流水线：', schedule_stages(stages))
 print('时间比较：', report)
 
+
 ```
 
-## Q5：哪些条件会消除理想重叠收益？
+## Q5: Which conditions eliminate the ideal overlap gain?
 
-验证时先检查依赖是否允许重叠，再检查执行资源是否独立，最后比较实际端到端时间；这样可以把“必须等待”与“本可重叠但未发生”区分开。
+When verifying, first check whether the dependencies allow overlap, then check whether the execution resources are independent, and finally compare the actual end-to-end time; this separates "must wait" from "could have overlapped but did not."
 
-| 条件 | 对模型结果的影响 | 实际执行时要核对 |
+| Condition | Effect on the model result | What to check during actual execution |
 |:---|:---|:---|
-| 消费者等待生产者 | 跨队列任务仍串行 | Event 与输入可用时刻 |
-| 同队列提交顺序 | 后续任务不能越过前项 | 队头等待是否阻塞独立工作 |
-| 多队列共用执行资源 | 理想并行时间偏乐观 | 拷贝引擎、计算资源与带宽争用 |
-| 提交或同步开销暴露 | 抵消部分甚至全部隐藏时间 | 主机提交与设备完成时间 |
-| Graph 捕获条件不满足 | 需要调整捕获子图或执行路径 | 形状、地址与操作支持 |
+| The consumer waits for the producer | Cross-queue tasks still run serially | Event timing and input availability time |
+| Same-queue submission order | Later tasks cannot pass earlier ones | Whether head-of-queue waiting blocks independent work |
+| Multiple queues share execution resources | The ideal parallel time is optimistic | Contention for copy engines, compute resources, and bandwidth |
+| Submission or synchronization overhead is exposed | Cancels part or even all of the hidden time | Host submission and device completion times |
+| Graph capture conditions are not met | The capture subgraph or execution path needs adjustment | Shape, addresses, and operation support |
 
-## 相关阅读
 
-**导语：** 将 stream 与 event 的依赖判断继续接到真实 collective 和通信重叠实验。
+## Related Reading
 
-- [Part 02 · 47 NCCL 通信剖析](../02_PyTorch_Algorithms/47_Communication_Profiling_with_NCCL.md)
-- [Part 02 · 48 通信热点与缓解](../02_PyTorch_Algorithms/48_Communication_Hotspots_and_Mitigation.md)
+**Overview:** Continue the stream and event dependency judgment into real collective and communication overlap experiments.
+
+- [Part 02 · 47 NCCL Communication Profiling](../02_PyTorch_Algorithms/47_Communication_Profiling_with_NCCL.md)
+- [Part 02 · 48 Communication Hotspots and Mitigation](../02_PyTorch_Algorithms/48_Communication_Hotspots_and_Mitigation.md)
 - [CUDA C Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/)
 ---

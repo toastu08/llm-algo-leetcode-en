@@ -1,6 +1,6 @@
 # 28. Fault Tolerance and Checkpointing | 容错与检查点
 
-**难度：** Medium-Hard | **环境：** CPU-first | **标签：** `系统工程`, `容错恢复`, `Checkpoint` | **目标人群：** 系统性能入门者
+**Difficulty:** Medium-Hard | **Environment:** CPU-first | **Tags:** `systems engineering`, `fault-tolerant recovery`, `Checkpoint` | **Audience:** learners starting with system performance
 
 > 🚀 **云端运行环境**
 >
@@ -12,45 +12,46 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-长时间训练可能因进程、设备或节点故障中断。检查点（checkpoint）必须保存足够状态，使训练恢复后继续沿一致的更新轨迹运行。
+Long training runs may be interrupted by a process, device, or node failure. A checkpoint must save enough state so that after training resumes it continues along a consistent update trajectory.
 
-本节建立“可恢复状态 → 保存频率 → 写入成本 → 恢复校验”的关系。完成后，你应能列出恢复所需状态，并比较故障损失、存储开销和恢复时间之间的取舍。
+This section establishes the relationship "recoverable state → save frequency → write cost → recovery validation." When you finish, you should be able to list the state required for recovery and compare the trade-off among failure loss, storage overhead, and recovery time.
 
-**关键词：** 检查点、恢复、容错
+**Keywords:** checkpoint, recovery, fault tolerance
 
-![本节概念关系](../public/01_Hardware_Math_and_Systems/28_checkpoint_recovery_map.svg)
-## 前置阅读
+![Concept relationships in this section](../public/01_Hardware_Math_and_Systems/28_checkpoint_recovery_map.svg)
+## Prerequisite Reading
 
-**导语：** 先把显存压力、并行决策和通信调度对应到训练状态，再检查哪些状态必须保存、恢复后如何验证，以及保存策略如何影响训练吞吐和恢复时间。
+**Overview:** First map memory pressure, parallel decisions, and communication scheduling onto the training state, then check which state must be saved, how to validate it after recovery, and how the save policy affects training throughput and recovery time.
 
-- [06. VRAM Calculation and ZeRO | 显存计算与 ZeRO 优化](./06_VRAM_Calculation_and_ZeRO.md)
-- [26. Parallel Strategy Decision Framework | 并行策略决策框架](./26_Parallel_Strategy_Decision_Framework.md)
-- [27. Communication Scheduling Optimization | 通信调度优化](./27_Communication_Scheduling_Optimization.md)
-## Q1：Checkpoint 保存的到底是什么？
+- [06. VRAM Calculation and ZeRO](./06_VRAM_Calculation_and_ZeRO.md)
+- [26. Parallel Strategy Decision Framework](./26_Parallel_Strategy_Decision_Framework.md)
+- [27. Communication Scheduling Optimization](./27_Communication_Scheduling_Optimization.md)
+## Q1: What does a Checkpoint actually save?
 
 
-检查点保存的不是单个模型文件，而是恢复训练所需的一组状态及其清单。
+A checkpoint does not save a single model file; it saves the set of states required to resume training together with their manifest.
 
-通常至少包括：
-- 模型权重
-- 优化器状态
-- 学习率调度器状态
-- 随机数种子
-- 训练进度
+It usually includes at least:
+- Model weights
+- Optimizer state
+- Learning-rate scheduler state
+- Random number seeds
+- Training progress
 
-每项状态都应在 manifest 中登记角色、大小和标识。只有完整清单提交后，检查点才可被恢复端读取；只保存权重只能用于加载模型，不能保证恢复同一训练轨迹。
+Each state should be registered in the manifest with its role, size, and identifier. Only after the complete manifest is committed can the checkpoint be read by the recovery side; saving only the weights can load a model but cannot guarantee resuming the same training trajectory.
 
-### Q1小验证
-构造检查点 manifest，验证缺少必需状态时不能标记为可恢复。
+
+### Q1 mini check
+Construct a checkpoint manifest and verify that it cannot be marked as recoverable when required state is missing.
 
 
 ```python
 REQUIRED_ROLES = {'model', 'optimizer', 'scheduler', 'rng', 'progress'}
 
 def inspect_checkpoint_manifest(entries, committed):
-    """检查训练恢复所需角色、文件大小和提交状态。"""
+    """Check the roles, file sizes, and commit status required to resume training."""
     roles = {entry['role'] for entry in entries}
     missing = sorted(REQUIRED_ROLES - roles)
     invalid_files = sorted(entry['path'] for entry in entries if entry['size_mib'] <= 0)
@@ -77,26 +78,28 @@ assert not weights_only['recoverable'] and 'optimizer' in weights_only['missing_
 print('完整检查点：', complete)
 print('仅有权重：', weights_only)
 
+
 ```
 
-## Q2：失败概率和恢复时间如何影响有效训练时间？
+## Q2: How do failure probability and recovery time affect the effective training time?
 
 
-长训练需要同时估计故障次数、平均回滚量和重新加载时间。若故障在两个检查点之间近似均匀发生，平均回滚计算量约为保存间隔的一半。
+Long training runs must estimate the number of failures, the average rollback amount, and the reload time at the same time. If failures occur approximately uniformly between two checkpoints, the average rollback compute is about half the save interval.
 
-- 任务越长，出故障概率越高
-- 重新从头跑的损失可能非常大
-- checkpoint 的目标，是把故障后的恢复成本压低
+- The longer the job, the higher the probability of a failure
+- The loss of rerunning from scratch can be very large
+- The goal of a checkpoint is to push down the recovery cost after a failure
 
-该估算不是故障预测器，而是用于比较检查点间隔的统一成本口径。
+This estimate is not a failure predictor, but a uniform cost basis for comparing checkpoint intervals.
 
-### Q2小验证
-估算给定保存间隔下的预期回滚与恢复开销。
+
+### Q2 mini check
+Estimate the expected rollback and recovery overhead for a given save interval.
 
 
 ```python
 def expected_failure_overhead(run_hours, fault_rate_per_hour, interval_minutes, reload_minutes):
-    """按均匀故障假设估算回滚计算与重新加载时间。"""
+    """Estimate rollback computation and reload time under a uniform failure assumption."""
     if min(run_hours, fault_rate_per_hour, interval_minutes, reload_minutes) < 0 or interval_minutes == 0:
         raise ValueError('时间和故障率不得为负，检查点间隔必须大于 0')
     expected_faults = run_hours * fault_rate_per_hour
@@ -115,26 +118,28 @@ assert half_hourly['expected_rollback_minutes'] < hourly['expected_rollback_minu
 print('每 60 分钟保存：', hourly)
 print('每 30 分钟保存：', half_hourly)
 
+
 ```
 
-## Q3：保存和恢复为什么也有成本？
+## Q3: Why do saving and restoring also have a cost?
 
 
-检查点写入会暂停或竞争训练资源。缩短间隔会减少故障后的平均回滚量，却增加写入次数；延长间隔则相反。
+Checkpoint writing pauses or competes with training resources. A shorter interval reduces the average rollback amount after a failure but increases the number of writes; a longer interval does the opposite.
 
-如果保存太频繁，会拖慢训练；如果保存太少，一旦故障，回滚代价又会变大。分布式场景里，保存和恢复还会涉及并行 IO、一致性和调度窗口。
+If you save too often, training slows down; if you save too rarely, the rollback cost becomes large once a failure happens. In distributed scenarios, saving and restoring also involve parallel I/O, consistency, and the scheduling window.
 
-分布式场景还要记录写入是否异步、各 rank 分片是否一致，以及 manifest 何时原子提交。这里先比较同步写入时的理论开销。
+Distributed scenarios also need to record whether the write is asynchronous, whether the shards of each rank are consistent, and when the manifest is committed atomically. Here we first compare the theoretical overhead of synchronous writes.
 
-### Q3小验证
-扫描多个保存间隔，观察写入成本和故障回滚成本如何变化。
+
+### Q3 mini check
+Scan several save intervals and observe how the write cost and the failure rollback cost change.
 
 
 ```python
 import math
 
 def checkpoint_interval_cost(run_minutes, interval_minutes, save_minutes, fault_rate_per_hour, reload_minutes):
-    """比较同步保存、预期回滚和重新加载三类开销。"""
+    """Compare the three kinds of overhead: synchronous saving, expected rollback, and reloading."""
     if interval_minutes <= 0 or min(run_minutes, save_minutes, fault_rate_per_hour, reload_minutes) < 0:
         raise ValueError('检查点间隔必须大于 0，其余输入不得为负')
     save_count = math.floor(run_minutes / interval_minutes)
@@ -157,22 +162,24 @@ for report in reports:
     print(report)
 print('当前假设下开销最小的间隔：', best['interval_minutes'], '分钟')
 
+
 ```
 
-## Q4：如何判断一个 checkpoint 方案真的可恢复？
+## Q4: How do you judge whether a checkpoint plan is truly recoverable?
 
 
-分布式检查点只有在以下条件同时满足时才可恢复：必需状态齐全，所有 rank 分片属于同一个 checkpoint ID，分片数量与 manifest 一致，且 manifest 已完成提交。
+A distributed checkpoint is recoverable only when the following conditions are satisfied at the same time: the required state is complete, all rank shards belong to the same checkpoint ID, the number of shards matches the manifest, and the manifest has been committed.
 
-当恢复时的 world size 发生变化，还需要框架明确支持 reshard；不能仅凭文件存在就假定可以加载。
+When the world size at recovery time changes, the framework must also explicitly support resharding; you cannot assume that loading works merely because the files exist.
 
-### Q4小验证
-验证分布式分片、检查点标识和提交状态是否一致。
+
+### Q4 mini check
+Verify whether the distributed shards, the checkpoint identifier, and the commit status are consistent.
 
 
 ```python
 def validate_sharded_checkpoint(manifest, shards):
-    """检查分片数量、检查点标识、rank 覆盖和原子提交状态。"""
+    """Check the shard count, the checkpoint identifier, the rank coverage, and the atomic commit status."""
     issues = []
     expected_ranks = set(range(manifest['world_size']))
     actual_ranks = {shard['rank'] for shard in shards}
@@ -196,13 +203,14 @@ assert not validate_sharded_checkpoint(manifest, missing_shard)['recoverable']
 print('完整分片：', validate_sharded_checkpoint(manifest, complete_shards))
 print('缺少分片：', validate_sharded_checkpoint(manifest, missing_shard))
 
+
 ```
 
-## 相关阅读
+## Related Reading
 
-**导语：** 继续把状态保存、恢复校验和训练产物交付放进同一条恢复链。
+**Overview:** Continue by putting state saving, recovery validation, and training artifact delivery into one recovery chain.
 
-- [04 SFT 实验、Artifact 与交付](../topic_discussion/post_training_optimization/04_end_to_end_experiment.md)
-- [62. Instruction Fine Tuning Project | 指令微调项目](../02_PyTorch_Algorithms/62_Instruction_Fine_Tuning_Project.md)
-- [PyTorch Distributed Checkpoint | PyTorch 分布式检查点文档](https://pytorch.org/docs/stable/distributed.checkpoint.html)
+- [04 SFT Experiments, Artifact, and Delivery](../topic_discussion/post_training_optimization/04_end_to_end_experiment.md)
+- [62. Instruction Fine Tuning Project](../02_PyTorch_Algorithms/62_Instruction_Fine_Tuning_Project.md)
+- [PyTorch Distributed Checkpoint](https://pytorch.org/docs/stable/distributed.checkpoint.html)
 ---

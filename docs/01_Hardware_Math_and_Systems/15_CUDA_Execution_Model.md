@@ -1,6 +1,6 @@
 # 15. CUDA Execution Model | CUDA 执行模型
 
-**难度：** Medium | **环境：** CPU-first | **标签：** `算子编程`, `CUDA`, `执行模型` | **目标人群：** 编译与系统入门者
+**Difficulty:** Medium | **Environment:** CPU-first | **Tags:** `operator programming`, `CUDA`, `execution model` | **Audience:** learners starting with compilers and systems
 
 > 🚀 **云端运行环境**
 >
@@ -12,40 +12,43 @@
 
 ---
 
-## 本节导读
+## Section Guide
 
-CUDA 将一次内核启动的线程组织成 Grid 和 Block；同一 Block 内的线程再按 Warp 分组执行。程序选择网格和块大小，设备则决定这些工作如何在 SM 上驻留和执行。任务组织不是 GPU 核心数量的逐层展开。
+CUDA organizes the threads of one kernel launch into Grids and Blocks; threads inside the same Block are then grouped into Warps for execution. The program chooses the grid and block sizes, and the device decides how this work resides and executes on the SMs. The task organization is not a layer-by-layer unfolding of the number of GPU cores.
 
-本节从任务覆盖、Warp 打包和 Block 资源约束建立执行账本。完成后，你应能从元素数量推导 launch 几何，并判断一个 Block 配置是否满足线程、共享内存和寄存器限制；这些能力直接支撑算子优化路线及 Part 03–04 的 Kernel 实现。
+This section builds the execution ledger from task coverage, Warp packing, and Block resource constraints. When you finish, you should be able to derive the launch geometry from the element count and judge whether a Block configuration satisfies the thread, shared memory, and register limits; these capabilities directly support the operator optimization route and the Kernel implementations in Parts 03–04.
 
-**关键词：** `grid`, `block`, `warp`
+**Keywords:** `grid`, `block`, `warp`
 
-![CUDA 执行层级与资源映射](../public/01_Hardware_Math_and_Systems/15_cuda_execution_hierarchy.svg)
+![CUDA execution hierarchy and resource mapping](../public/01_Hardware_Math_and_Systems/15_cuda_execution_hierarchy.svg)
 
 ---
-## 前置阅读
+## Prerequisite Reading
 
-**导语：** 先理解 GPU 资源和 CUDA 编程模型，再把张量任务映射到 Grid、Block、Warp 与 Thread。
+**Overview:** First understand GPU resources and the CUDA programming model, then map a tensor task onto Grid, Block, Warp, and Thread.
 
-- [03. GPU Architecture and Memory | GPU 物理架构与内存层级](./03_GPU_Architecture_and_Memory.md)
-- [08. Programming Models and CUDA/Triton | 编程模型演进](./08_Programming_Models_CUDA_Triton.md)
+- [03. GPU Architecture and Memory](./03_GPU_Architecture_and_Memory.md)
+- [08. Programming Models and CUDA/Triton](./08_Programming_Models_CUDA_Triton.md)
 
-## Q1：GPU 上的 kernel 为什么不是“一个线程在跑”？
 
-Thread（线程）执行局部计算，若干线程组成 Block（线程块），一次启动的全部 Block 组成 Grid（网格）。这些是程序组织任务的单位，不是芯片预先固定拥有的 Grid 或 Block 数量。NVIDIA 将同一块内连续编号的线程按 32 个分为一个 Warp，Lane 表示线程在该组中的位置；分支和边界条件会让部分 Lane 不参与某条指令。
+## Q1: Why is a kernel on the GPU not "one thread running"?
 
-例如每线程处理一个元素，1000 个元素使用每块 256 个线程时，需要 4 个 Block，每块 8 个 Warp，最后 24 个线程不处理有效元素。若改成每块 128 个线程，就需要 8 个 Block、每块 4 个 Warp。两者覆盖相同输入，却改变了块内协作与资源分配，不能仅凭总线程数相同就判断耗时相同。
+A Thread executes local computation, several threads form a Block, and all Blocks of one launch form a Grid. These are the units by which the program organizes tasks, not a number of Grids or Blocks that the chip has fixed in advance. NVIDIA groups 32 consecutively numbered threads in the same block into one Warp, and Lane denotes the thread's position within that group; branches and boundary conditions cause some Lanes not to participate in a given instruction.
 
-SM（流式多处理器）是承载这些工作的硬件单元。一个 SM 可以驻留多个满足资源约束的 Block，Grid 的 Block 数也可以多于 SM 数，剩余工作等待资源；Block 编号不指定某个固定 SM，Warp 也不是 32 个独占物理计算核心。线程可按地址访问全局内存，执行层级不是逐层收窄的内存权限。官方定义见 [CUDA 编程模型](https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html)。
+For example, if each thread handles one element, then for 1000 elements with 256 threads per block you need 4 Blocks with 8 Warps each, and the last 24 threads process no valid elements. If you change to 128 threads per block, you need 8 Blocks with 4 Warps each. Both cover the same input, but they change the in-block collaboration and resource allocation; you cannot judge that the time is the same just because the total thread count is the same.
 
-### Q1 机制计算器：从元素数量推导 Grid、Block 与 Warp
+The SM (streaming multiprocessor) is the hardware unit that carries this work. One SM can hold multiple Blocks that satisfy the resource constraints, and the Block count of a Grid can also exceed the SM count, with the remaining work waiting for resources; a Block number does not designate a fixed SM, and a Warp is not 32 dedicated physical compute cores either. Threads can access global memory by address; the execution hierarchy is not a memory permission that narrows layer by layer. See the [CUDA programming model](https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html) for the official definition.
 
-假设每个线程负责一个元素，先计算最小覆盖网格，再区分尾块中超出输入的线程与每块按 Warp 打包产生的空槽；两者不是同一数量。
+
+### Q1 mechanism calculator: Derive Grid, Block, and Warp from the element count
+
+Assume each thread handles one element; first compute the minimum covering grid, then distinguish the threads in the tail block that exceed the input from the empty slots produced by packing each block into Warps; the two are not the same quantity.
+
 
 
 ```python
 def launch_geometry(num_elements, threads_per_block, warp_size=32):
-    """计算一维 kernel 的 block、warp 和尾块有效线程。"""
+    """Compute the blocks, warps, and valid threads in the tail block of a one-dimensional kernel."""
     if any(type(value) is not int or value <= 0 for value in (num_elements, threads_per_block, warp_size)):
         raise ValueError('元素数、块线程数和 Warp 大小必须是正整数')
     blocks = (num_elements + threads_per_block - 1) // threads_per_block
@@ -67,24 +70,27 @@ assert launch_geometry(1000, 256)['inactive_tail_threads'] == 24
 assert launch_geometry(66, 33)['unassigned_warp_slots'] == 62
 assert launch_geometry(66, 33)['inactive_tail_threads'] == 0
 
+
 ```
 
-## Q2：Block 内怎样通过共享内存复用数据？
+## Q2: How is data reused inside a Block through shared memory?
 
-Block 为线程提供共享内存与协作边界，Warp 是线程的执行分组。生产者写入数据、消费者读取数据时，需要满足对应的同步与可见性条件；属于同一 Warp 不代表可以省略所有同步检查。
+A Block provides threads with shared memory and a collaboration boundary, and a Warp is the execution grouping of threads. When producers write data and consumers read it, the corresponding synchronization and visibility conditions must be satisfied; belonging to the same Warp does not mean that all synchronization checks can be omitted.
 
-把重复使用的数据先搬入共享内存，可以减少逻辑全局读取。是否减少实际 HBM 流量、是否缩短时间，还取决于缓存命中、同步和片上资源占用。
+Moving repeatedly used data into shared memory first can reduce logical global reads. Whether it reduces actual HBM traffic and whether it shortens the time also depends on cache hits, synchronization, and on-chip resource occupancy.
 
-![Block 内共享内存复用路径](../public/01_Hardware_Math_and_Systems/15_memory_reuse_path.svg)
+![Shared memory reuse path within a Block](../public/01_Hardware_Math_and_Systems/15_memory_reuse_path.svg)
 
-### Q2 流量账本：复用减少了多少全局读取请求
 
-假设每次都完整读取数据块，且暂不计缓存命中，比较重复读取与每块搬入一次的字节量。实际 HBM 流量还受缓存影响，不能直接用这些逻辑读取字节替代硬件计数。
+### Q2 traffic ledger: How much reuse reduces the global read requests
+
+Assume the data block is read in full every time and cache hits are ignored for now, then compare the byte volume of repeated reads with loading it once per block. Actual HBM traffic is also affected by the cache, so these logical read bytes cannot be used directly in place of hardware counters.
+
 
 
 ```python
 def block_reuse_traffic(blocks, tile_elements, bytes_per_element, reuse_count):
-    """比较整块重复全局读取与每块只搬入一次的逻辑字节量。"""
+    """Compare the logical byte volume of repeated full-block global reads with loading once per block."""
     if any(type(value) is not int or value <= 0 for value in (blocks, tile_elements, bytes_per_element, reuse_count)):
         raise ValueError('块数、元素数、元素字节数和使用次数必须是正整数')
     tile_bytes = tile_elements * bytes_per_element
@@ -101,25 +107,28 @@ for reuse_count in [1, 2, 4]:
     print('reuse', reuse_count, '->', block_reuse_traffic(8, 4096, 2, reuse_count))
 assert block_reuse_traffic(8, 4096, 2, 1)['global_read_bytes_saved'] == 0
 
+
 ```
 
-## Q3：单个 Block 的资源需求怎样限制配置？
+## Q3: How does the resource requirement of a single Block constrain the configuration?
 
-相同任务可以选择不同线程数、共享内存和寄存器用量，但这些资源都受设备与编译配置限制。先逐项计算单块需求，再与给定预算比较；线程数过多、共享内存超限或寄存器需求过高，都可能让配置无法按预期执行。
+The same task can choose different thread counts, shared memory, and register usage, but these resources are all limited by the device and the compilation configuration. First compute the per-block requirement item by item, then compare it with the given budget; too many threads, shared memory over the limit, or too high a register requirement can all prevent the configuration from executing as expected.
 
-块大小是程序选择，允许的范围则由设备与内核共同限制；共享内存和寄存器的预算也不是所有代际通用的固定数字。下面用示例预算检查单块需求；多块驻留和分配粒度继续在 SRAM 优化小节计算。资源检查与张量覆盖检查需要同时成立，才能进入实际核函数验证；还应核对编译后的寄存器和共享内存用量、启动限制及输出，再测量时间。
+The block size is chosen by the program, while the allowed range is limited jointly by the device and the kernel; the shared memory and register budgets are also not fixed numbers shared by all generations. The example budget below checks the per-block requirement; multi-block residency and allocation granularity continue to be computed in the SRAM optimization subsection. The resource check and the tensor coverage check must both hold before entering actual kernel verification; you should also check the compiled register and shared memory usage, the launch restrictions, and the output, and then measure the time.
 
-![执行模型到内核实现的映射](../public/01_Hardware_Math_and_Systems/15_execution_model_to_kernel.svg)
+![Mapping from the execution model to kernel implementation](../public/01_Hardware_Math_and_Systems/15_execution_model_to_kernel.svg)
 
-### Q3 资源门槛：检查单块配置是否超过给定预算
 
-预算是示例输入，不代表具体 GPU。分别检查每块线程数、共享内存、每线程寄存器与每块寄存器总量；暂不计分配粒度和多块驻留，预算内也不等于可以实际启动或达到高吞吐。
+### Q3 resource gate: Check whether a per-block configuration exceeds the given budget
+
+The budget is an example input and does not represent a specific GPU. Check the threads per block, the shared memory, the registers per thread, and the total registers per block separately; allocation granularity and multi-block residency are ignored for now, and staying within budget does not equal being able to actually launch or reach high throughput.
+
 
 
 ```python
 def block_resource_gate(threads_per_block, shared_bytes_per_block,
                         registers_per_thread, limits):
-    """按给定整数预算检查单块资源，不替代编译与设备启动验证。"""
+    """Check per-block resources against a given integer budget; does not replace compilation and device launch verification."""
     if type(threads_per_block) is not int or threads_per_block <= 0:
         raise ValueError('块线程数必须是正整数')
     if any(type(value) is not int or value < 0
@@ -158,11 +167,13 @@ assert 'registers_per_thread' in block_resource_gate(32, 0, 129, limits)['reason
 print(valid)
 print(invalid)
 
+
 ```
 
-## 相关阅读
+## Related Reading
 
-从逻辑任务覆盖继续到真实 CUDA 索引，或比较 Triton 的数据块抽象。
+Continue from logical task coverage to real CUDA indexing, or compare the Triton data-block abstraction.
 
-- [Part04·01 CUDA 向量加法](../04_CUDA_and_System_Optimization/01_CUDA_Custom_Kernel_Intro.md)：线程索引、尾块和实际启动。
-- [18 Triton Block 模型](./18_Triton_Block_Model.md)：Program、逻辑元素槽与物理线程的区别。
+- [Part04·01 CUDA Vector Addition](../04_CUDA_and_System_Optimization/01_CUDA_Custom_Kernel_Intro.md): thread indexing, tail blocks, and actual launches.
+- [18 Triton Block Model](./18_Triton_Block_Model.md): the difference between Programs, logical element slots, and physical threads.
+
